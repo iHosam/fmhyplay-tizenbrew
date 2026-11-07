@@ -1,10 +1,9 @@
 "use strict";
 
 /**
- * FMHYPlay Core Data Layer for Tizen TV
- * Ports Sites.java, Cats.java, Catalog.java, Iptv.java, Subs.java, Simkl.java, History.java, AdBlock.java
+ * FMHYPlay Core Data Layer for Samsung Tizen TV (TizenBrew)
+ * Ports Sites.java, Cats.java, Catalog.java, Iptv.java, Subs.java, Simkl.java, History.java
  */
-
 window.FMHYData = (function () {
   var SERVICE_URL = "http://127.0.0.1:8087";
   var serviceOnline = false;
@@ -61,43 +60,71 @@ window.FMHYData = (function () {
           body: JSON.stringify(patch)
         }).catch(function () {});
       }
+    },
+    getBool: function (key, defVal) {
+      var v = memStore[key];
+      if (v === undefined || v === null) return !!defVal;
+      return v === true || v === "true" || v === 1 || v === "1";
+    },
+    setBool: function (key, val) {
+      Store.set(key, !!val);
     }
   };
 
-  // Check TizenBrew Node.js background service
+  // Check TizenBrew Node.js background service (with 1.2s timeout so UI never hangs)
   function initService() {
-    return fetch(SERVICE_URL + "/api/ping")
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        if (d && d.ok) {
-          serviceOnline = true;
-          return fetch(SERVICE_URL + "/api/state")
-            .then(function (r2) { return r2.json(); })
-            .then(function (diskState) {
-              if (diskState && typeof diskState === "object") {
-                var keys = Object.keys(diskState);
-                for (var i = 0; i < keys.length; i++) {
-                  var k = keys[i];
-                  if (diskState[k] !== null && diskState[k] !== undefined && memStore[k] === undefined) {
-                    memStore[k] = diskState[k];
-                  }
-                }
-                try {
-                  localStorage.setItem("fmhyplay_store", JSON.stringify(memStore));
-                } catch (e) {}
-              }
-              return true;
-            });
+    return new Promise(function (resolve) {
+      var done = false;
+      var timer = setTimeout(function () {
+        if (!done) {
+          done = true;
+          serviceOnline = false;
+          resolve(false);
         }
-        return false;
-      })
-      .catch(function () {
-        serviceOnline = false;
-        return false;
-      });
+      }, 1200);
+
+      fetch(SERVICE_URL + "/api/ping")
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (done) return;
+          if (d && d.ok) {
+            serviceOnline = true;
+            return fetch(SERVICE_URL + "/api/state")
+              .then(function (r2) { return r2.json(); })
+              .then(function (diskState) {
+                if (diskState && typeof diskState === "object") {
+                  var keys = Object.keys(diskState);
+                  for (var i = 0; i < keys.length; i++) {
+                    var k = keys[i];
+                    if (diskState[k] !== null && diskState[k] !== undefined && memStore[k] === undefined) {
+                      memStore[k] = diskState[k];
+                    }
+                  }
+                  try {
+                    localStorage.setItem("fmhyplay_store", JSON.stringify(memStore));
+                  } catch (e) {}
+                }
+                clearTimeout(timer);
+                done = true;
+                resolve(true);
+              });
+          } else {
+            clearTimeout(timer);
+            done = true;
+            resolve(false);
+          }
+        })
+        .catch(function () {
+          if (!done) {
+            clearTimeout(timer);
+            done = true;
+            serviceOnline = false;
+            resolve(false);
+          }
+        });
+    });
   }
 
-  // Universal text fetcher (uses TizenBrew service when online or when custom headers/HTTP needed, else direct fetch)
   function fetchText(url, opts) {
     opts = opts || {};
     var needsService = opts.forceService || (url.indexOf("http://") === 0 && location.protocol === "https:") || opts.ua || opts.ref || opts.method === "POST";
@@ -152,451 +179,357 @@ window.FMHYData = (function () {
   function proxyPageUrl(url, searchQuery) {
     if (!url) return "";
     if (!serviceOnline) return url;
-    var adblock = Store.get("adblock", true) ? "1" : "0";
+    var adblock = Store.getBool("adblock", true) ? "1" : "0";
     var q = SERVICE_URL + "/proxy/page?url=" + encodeURIComponent(url) + "&adblock=" + adblock;
     if (searchQuery) q += "&q=" + encodeURIComponent(searchQuery);
     return q;
   }
 
-  // ---- Cats.java Port ----
+  // ---- Categories (Cats.java Port) ----
+  var CAT_LABELS = {
+    "streaming": "Movies & TV",
+    "anime": "Anime",
+    "livetv": "Live TV & Sports",
+    "cartoons": "Cartoons",
+    "drama": "Drama & Asian",
+    "docs": "Documentaries",
+    "tools": "Tracking & Specialty"
+  };
+
   var Cats = {
-    MOVIES: "Movies",
-    TV: "TV",
-    SPORTS: "Sports",
-    ANIME: "Anime",
-    LIVE: "Live TV",
-    MORE: "More",
-    ORDER: ["Movies", "TV", "Sports", "Anime", "Live TV", "More"],
-    of: function (section, tags) {
-      var out = [];
-      function add(c) {
-        if (out.indexOf(c) < 0) out.push(c);
-      }
-      if (section === "Anime Streaming") return [Cats.ANIME];
-      if (section === "Live Sports" || section === "Sports Replays") return [Cats.SPORTS];
-      if (section === "Stream Lounges" || section === "Specialty Streaming") return [Cats.MORE];
-      if (section === "Live TV") {
-        out.push(Cats.LIVE);
-        for (var i = 0; i < tags.length; i++) {
-          if (/(sport|football|motorsport|mma|wrestling|boxing|basketball|baseball|live event)/i.test(tags[i])) {
-            add(Cats.SPORTS);
-          }
-        }
-        return out;
-      }
-      if (section === "Cartoon Streaming" || section === "Drama Streaming" || section === "TV Streaming") {
-        out.push(Cats.TV);
-      } else if (
-        section !== "Stream Aggregators" &&
-        section !== "P-Stream Forks" &&
-        section !== "Dedicated-Server" &&
-        section !== "Multi-Server" &&
-        section !== "Video Streaming" &&
-        section !== "Free w/ Ads" &&
-        section !== "Classics / Public Domain" &&
-        section !== "Film Archives"
-      ) {
-        return out;
-      }
-      for (var j = 0; j < tags.length; j++) {
-        var t = String(tags[j] || "").toLowerCase();
-        if (/(movie|film)/.test(t)) add(Cats.MOVIES);
-        if (/(\btv\b|shows?|series|cartoon|drama)/.test(t)) add(Cats.TV);
-        if (/(anime|donghua)/.test(t)) add(Cats.ANIME);
-        if (/(sport|football|motorsport|mma|wrestling|boxing|basketball|baseball|live event)/.test(t)) add(Cats.SPORTS);
-      }
-      if (out.length === 0) {
-        var isMovieSec = section === "Classics / Public Domain" || section === "Film Archives" || section === "Video Streaming";
-        out.push(isMovieSec ? Cats.MOVIES : Cats.MORE);
-      }
-      return out;
+    ORDER: ["streaming", "anime", "livetv", "cartoons", "drama", "docs", "tools"],
+    label: function (catId) {
+      return CAT_LABELS[catId] || String(catId || "Streaming");
     }
   };
 
-  // ---- Sites.java Port ----
-  var SOURCE_VIDEO = "https://raw.githubusercontent.com/fmhy/edit/main/docs/video.md";
-  var SOURCE_LANG = "https://raw.githubusercontent.com/fmhy/edit/main/docs/non-english.md";
-  var ENTRY_RE = /^\*\s*(⭐|🌟|🌐)?\s*(?:\*\*)?\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)(?:\*\*)?(.*)$/;
-  var ANY_LINK_RE = /\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/g;
-  var LINK_STRIP_RE = /\[[^\]]*\]\([^)]*\)/g;
-  var INTERNAL_RE = /^https?:\/\/(?:www\.)?(?:reddit\.com\/r\/freemediaheckyeah|fmhy\.|rentry\.(?:co|org)\/fmhy|github\.com|raw\.githubusercontent\.com|gist\.github\.com|t\.me\/|discord\.gg)/i;
+  // ---- Built-in Curated FMHY Sites + Live Updates (Sites.java Port) ----
+  var BUILTIN_SITES = [
+    // Starred FMHY Picks - Movies & TV
+    { id: "cineby", name: "Cineby", cat: "streaming", urls: ["https://www.cineby.app", "https://www.cineby.ru"], star: true, tags: "Movies · TV · 4K · Fast" },
+    { id: "rivestream", name: "RiveStream", cat: "streaming", urls: ["https://rivestream.org", "https://rivestream.live"], star: true, tags: "Movies · TV · Anime · Multi-Server" },
+    { id: "flixer", name: "Flixer", cat: "streaming", urls: ["https://flixer.su"], star: true, tags: "Movies · TV · Auto-Next" },
+    { id: "brocoflix", name: "BrocoFlix", cat: "streaming", urls: ["https://brocoflix.com"], star: true, tags: "Movies · TV · 1080p" },
+    { id: "hydrahd", name: "HydraHD", cat: "streaming", urls: ["https://hydrahd.me", "https://hydrahd.cc"], star: true, tags: "Movies · TV · 1080p · Fast" },
+    { id: "flickystream", name: "FlickyStream", cat: "streaming", urls: ["https://flickystream.com"], star: true, tags: "Movies · TV · Multi-Audio" },
+    { id: "xprime", name: "XPrime", cat: "streaming", urls: ["https://xprime.tv"], star: true, tags: "Movies · TV · 4K" },
+    { id: "rgshows", name: "RGShows", cat: "streaming", urls: ["https://www.rgshows.me"], star: true, tags: "Movies · TV · Anime" },
+    { id: "vidbox", name: "VidBox", cat: "streaming", urls: ["https://vidbox.to"], star: true, tags: "Movies · TV · Clean UI" },
+    { id: "1shows", name: "1Shows", cat: "streaming", urls: ["https://www.1shows.live"], star: true, tags: "Movies · TV · Fast" },
+    { id: "spenflix", name: "SpenFlix", cat: "streaming", urls: ["https://watch.spencerdevs.xyz"], star: false, tags: "Movies · TV · P-Stream" },
+    { id: "nepu", name: "Nepu", cat: "streaming", urls: ["https://nepu.to"], star: false, tags: "Movies · TV · 1080p" },
+    { id: "fmovies", name: "FMovies+", cat: "streaming", urls: ["https://www.fmovies.gd"], star: false, tags: "Movies · TV" },
+    { id: "cinemaos", name: "CinemaOS", cat: "streaming", urls: ["https://cinemaos.live"], star: false, tags: "Movies · TV" },
+    { id: "veloratv", name: "VeloraTV", cat: "streaming", urls: ["https://veloratv.ru"], star: false, tags: "Movies · TV" },
+    { id: "hexawatch", name: "HexaWatch", cat: "streaming", urls: ["https://hexa.watch"], star: false, tags: "Movies · TV · 4K" },
+    { id: "cinetaro", name: "CineTaro", cat: "streaming", urls: ["https://cinetaro.buzz"], star: false, tags: "Movies · TV · Anime" },
+    { id: "lookmovie2", name: "LookMovie", cat: "streaming", urls: ["https://www.lookmovie2.to"], star: false, tags: "Movies · TV · Dedicated" },
+    { id: "pressplay", name: "PressPlay", cat: "streaming", urls: ["https://www.pressplay.top"], star: false, tags: "Movies · TV" },
+    { id: "sflix", name: "SFlix", cat: "streaming", urls: ["https://sflix2.to"], star: false, tags: "Movies · TV" },
 
-  var DEFAULT_DEEPLINKS = {
-    "cinejoy.pk": { "movie": "/movie/{tmdb}", "tv": "/series/{tmdb}" },
-    "movy.sx": { "movie": "/movie/{tmdb}", "tv": "/tv/{tmdb}" },
-    "7movies.ac": { "movie": "/movie/{tmdb}", "tv": "/tv/{tmdb}" },
-    "arrowtv.net": { "movie": "/movie/{tmdb}", "tv": "/tv/{tmdb}" },
-    "chillflix.lol": { "movie": "/movie/{tmdb}", "tv": "/tv/{tmdb}" },
-    "popwatch.to": { "movie": "/movie/{tmdb}", "tv": "/tv/{tmdb}" },
-    "kaitotv.com": { "movie": "/movie/{tmdb}", "tv": "/tv/{tmdb}" },
-    "cinebytv.com": { "movie": "/movie/{tmdb}", "tv": "/tv/{tmdb}" },
-    "cineby.app": { "movie": "/movie/{tmdb}", "tv": "/tv/{tmdb}" },
-    "cineby.ru": { "movie": "/movie/{tmdb}", "tv": "/tv/{tmdb}" },
-    "rivestream.org": { "movie": "/watch?type=movie&id={tmdb}", "tv": "/watch?type=tv&id={tmdb}" },
-    "rivestream.live": { "movie": "/watch?type=movie&id={tmdb}", "tv": "/watch?type=tv&id={tmdb}" },
-    "streamgoblin.cc": { "movie": "/movie/{tmdb}", "tv": "/tv/{tmdb}" },
-    "cno.to": { "movie": "/movie/{tmdb}", "tv": "/show/{tmdb}" },
-    "consumit.online": { "movie": "/title/{tmdb}", "tv": "/series/{tmdb}" },
-    "meowly.qzz.io": { "movie": "/watch/movie/{tmdb}" },
-    "nexa.mov": { "movie": "/watch/tmdb-movie/{tmdb}", "tv": "/watch/tmdb-tv/{tmdb}" },
-    "cinecat.eu": { "movie": "/media/tmdb-movie-{tmdb}", "tv": "/media/tmdb-tv-{tmdb}" },
-    "aether.st": { "movie": "/media/tmdb-movie-{tmdb}", "tv": "/media/tmdb-tv-{tmdb}" },
-    "basementx.lol": { "movie": "/media/tmdb-movie-{tmdb}", "tv": "/media/tmdb-tv-{tmdb}" },
-    "cinefork.net": { "movie": "/media/tmdb-movie-{tmdb}", "tv": "/media/tmdb-tv-{tmdb}" },
-    "streamwatch.online": { "movie": "/media/tmdb-movie-{tmdb}", "tv": "/media/tmdb-tv-{tmdb}" },
-    "peestream.in": { "movie": "/media/tmdb-movie-{tmdb}", "tv": "/media/tmdb-tv-{tmdb}" },
-    "fmfau.com": { "movie": "/media/tmdb-movie-{tmdb}", "tv": "/media/tmdb-tv-{tmdb}" },
-    "kdesa.stream": { "movie": "/media/tmdb-movie-{tmdb}" }
-  };
+    // Anime
+    { id: "miruro", name: "Miruro", cat: "anime", urls: ["https://www.miruro.tv", "https://www.miruro.online"], star: true, tags: "Sub · Dub · Multi-Source" },
+    { id: "hianime", name: "HiAnime", cat: "anime", urls: ["https://hianime.to", "https://hianime.sx"], star: true, tags: "Sub · Dub · Auto-Next" },
+    { id: "animekai", name: "AnimeKai", cat: "anime", urls: ["https://animekai.to", "https://animekai.bz"], star: true, tags: "Sub · Dub · Hard-Sub" },
+    { id: "allmanga", name: "AllManga", cat: "anime", urls: ["https://allmanga.to"], star: true, tags: "Sub · Dub · 1080p" },
+    { id: "animepahe", name: "AnimePahe", cat: "anime", urls: ["https://animepahe.ru", "https://animepahe.com"], star: true, tags: "Sub · Dub · 1080p" },
+    { id: "kickassanime", name: "KickAssAnime", cat: "anime", urls: ["https://kaa.mx"], star: false, tags: "Sub · Dub · 1080p" },
+    { id: "aniplay", name: "AniPlay", cat: "anime", urls: ["https://aniplaynow.live"], star: false, tags: "Sub · Dub · AniList Sync" },
+    { id: "shiroko", name: "Shiroko", cat: "anime", urls: ["https://shiroko.co"], star: false, tags: "Sub · Dub · Clean" },
+    { id: "anikoto", name: "AniKoto", cat: "anime", urls: ["https://anikoto.tv"], star: false, tags: "Sub · Dub" },
+    { id: "wco", name: "WCO Stream", cat: "anime", urls: ["https://www.wcostream.tv"], star: false, tags: "Anime · Cartoons · Dub" },
 
-  // Built-in TV Embed Servers for 1-click Catalog Movie/Episode playback
-  var EMBED_SERVERS = [
-    {
-      name: "VidSrc Pro",
-      movie: "https://vidsrc.cc/v2/embed/movie/{id}",
-      tv: "https://vidsrc.cc/v2/embed/tv/{id}/{s}/{e}"
-    },
-    {
-      name: "VidLink",
-      movie: "https://vidlink.pro/movie/{tmdb}?autoplay=true",
-      tv: "https://vidlink.pro/tv/{tmdb}/{s}/{e}?autoplay=true"
-    },
-    {
-      name: "AutoEmbed",
-      movie: "https://player.autoembed.cc/embed/movie/{id}",
-      tv: "https://player.autoembed.cc/embed/tv/{id}/{s}/{e}"
-    },
-    {
-      name: "VidSrc XYZ",
-      movie: "https://vidsrc.xyz/embed/movie/{id}",
-      tv: "https://vidsrc.xyz/embed/tv/{id}/{s}-{e}"
-    },
-    {
-      name: "MultiEmbed",
-      movie: "https://multiembed.mov/?video_id={id}",
-      tv: "https://multiembed.mov/?video_id={id}&s={s}&e={e}"
-    },
-    {
-      name: "2Embed",
-      movie: "https://www.2embed.cc/embed/{id}",
-      tv: "https://www.2embed.cc/embedtv/{id}&s={s}&e={e}"
-    }
+    // Live TV & Sports
+    { id: "thetvapp", name: "TheTVApp", cat: "livetv", urls: ["https://thetvapp.to"], star: true, tags: "US Live TV · Sports · 1080p" },
+    { id: "tvgarden", name: "TV Garden", cat: "livetv", urls: ["https://tv.garden"], star: true, tags: "Global Live TV · 3D Globe" },
+    { id: "ntvstream", name: "NTVStream", cat: "livetv", urls: ["https://ntvstream.cx"], star: true, tags: "US/UK Channels · Sports" },
+    { id: "streamed", name: "Streamed", cat: "livetv", urls: ["https://streamed.su"], star: true, tags: "Live Sports · HD Events" },
+    { id: "ppvland", name: "PPV.LAND", cat: "livetv", urls: ["https://ppv.wtf", "https://ppv.land"], star: true, tags: "Live Sports · PPV · 1080p" },
+    { id: "dlhd", name: "DaddyLiveHD", cat: "livetv", urls: ["https://dlhd.dad"], star: false, tags: "24/7 Live TV · Sports" },
+    { id: "sportssurge", name: "SportsSurge", cat: "livetv", urls: ["https://v2.sportsurge.net"], star: false, tags: "NFL · NBA · Soccer · F1" },
+    { id: "methstreams", name: "MethStreams", cat: "livetv", urls: ["https://methstreams.cx"], star: false, tags: "Live Sports · MMA · NBA" },
+    { id: "WatchFooty", name: "WatchFooty", cat: "livetv", urls: ["https://www.watchfooty.st"], star: false, tags: "Football · Live Sports" },
+
+    // Cartoons
+    { id: "kimcartoon", name: "WatchCartoonsOnline", cat: "cartoons", urls: ["https://www.wcofun.net"], star: true, tags: "Cartoons · Animated Series" },
+    { id: "kisscartoon", name: "KissCartoon", cat: "cartoons", urls: ["https://kisscartoon.sh"], star: false, tags: "Cartoons · Movies" },
+    { id: "toonstream", name: "ToonStream", cat: "cartoons", urls: ["https://toonstream.co"], star: false, tags: "Cartoons · Anime" },
+
+    // Drama & Asian
+    { id: "kisskh", name: "KissKH", cat: "drama", urls: ["https://kisskh.co", "https://kisskh.ovh"], star: true, tags: "K-Drama · C-Drama · Anime" },
+    { id: "dramacool", name: "DramaCool", cat: "drama", urls: ["https://dramacool.bg"], star: true, tags: "Asian Drama · K-Show" },
+    { id: "goplay", name: "GoPlay", cat: "drama", urls: ["https://goplay.su"], star: false, tags: "Asian Drama · Viki Streams" },
+    { id: "myasiantv", name: "MyAsianTV", cat: "drama", urls: ["https://myasiantv.ac"], star: false, tags: "K-Drama · Movies" },
+
+    // Documentaries
+    { id: "ihavenotv", name: "IHaveNoTV", cat: "docs", urls: ["https://ihavenotv.com"], star: true, tags: "Curated Documentaries" },
+    { id: "topdocumentary", name: "TopDocumentaryFilms", cat: "docs", urls: ["https://topdocumentaryfilms.com"], star: true, tags: "Free Documentaries" },
+    { id: "docuwiki", name: "DocuWiki", cat: "docs", urls: ["https://docuwiki.net"], star: false, tags: "Documentary Archive" },
+
+    // Tracking & Specialty
+    { id: "simkl", name: "Simkl", cat: "tools", urls: ["https://simkl.com"], star: true, tags: "Tracker · TV · Anime · Movies" },
+    { id: "internetarchive", name: "Internet Archive", cat: "tools", urls: ["https://archive.org/details/movies"], star: true, tags: "Public Domain · Classics" }
   ];
 
-  var parsedSitesCache = null;
-  var parsedLangsCache = null;
+  var EMBED_SERVERS = [
+    { label: "VidSrc CC", movie: "https://vidsrc.cc/v2/embed/movie/{id}", tv: "https://vidsrc.cc/v2/embed/tv/{id}/{s}/{e}" },
+    { label: "VidLink Pro", movie: "https://vidlink.pro/movie/{id}?autoplay=true", tv: "https://vidlink.pro/tv/{id}/{s}/{e}?autoplay=true" },
+    { label: "AutoEmbed", movie: "https://player.autoembed.cc/embed/movie/{id}", tv: "https://player.autoembed.cc/embed/tv/{id}/{s}/{e}" },
+    { label: "VidSrc XYZ", movie: "https://vidsrc.xyz/embed/movie/{id}", tv: "https://vidsrc.xyz/embed/tv/{id}/{s}-{e}" },
+    { label: "MultiEmbed", movie: "https://multiembed.mov/?video_id={id}", tv: "https://multiembed.mov/?video_id={id}&s={s}&e={e}" },
+    { label: "2Embed", movie: "https://www.2embed.cc/embed/{id}", tv: "https://www.2embed.cc/embedtv/{id}&s={s}&e={e}" }
+  ];
 
-  function parseEntry(line, group) {
-    var m = ENTRY_RE.exec(String(line || "").trim());
-    if (!m || INTERNAL_RE.test(m[3])) return null;
-    var s = {
-      index: m[1] === "🌐",
-      pick: !!m[1] && m[1] !== "🌐",
-      name: m[2].replace(/[\u2060\u200b]/g, "").trim(),
-      url: m[3],
-      tags: "",
-      group: group || "",
-      tagList: [],
-      mirrors: []
-    };
-    var rest = m[4] || "";
-    var dash = rest.indexOf(" - ");
-    var head = dash >= 0 ? rest.substring(0, dash) : rest;
-    var tail = dash >= 0 ? rest.substring(dash + 3) : "";
+  // Default search URL patterns per domain
+  var SEARCH_PATTERNS = {
+    "cineby.app": "/search?q={q}",
+    "cineby.ru": "/search?q={q}",
+    "rivestream.org": "/search?q={q}",
+    "flixer.su": "/search?q={q}",
+    "hydrahd.me": "/index.php?menu=search&query={q}",
+    "miruro.tv": "/search?query={q}",
+    "hianime.to": "/search?keyword={q}",
+    "animekai.to": "/browser?keyword={q}",
+    "allmanga.to": "/anime?cty=ALL&query={q}",
+    "kisskh.co": "/Search?q={q}"
+  };
 
-    ANY_LINK_RE.lastIndex = 0;
-    var mm;
-    while ((mm = ANY_LINK_RE.exec(head)) !== null) {
-      if (!INTERNAL_RE.test(mm[1]) && mm[1] !== s.url) {
-        s.mirrors.push(mm[1]);
+  function hydrateSiteObject(raw) {
+    var urls = Array.isArray(raw.urls) && raw.urls.length > 0 ? raw.urls : [raw.url || "https://fmhy.net"];
+    var id = raw.id || String(raw.name || urls[0]).toLowerCase().replace(/[^a-z0-9]+/g, "");
+    return {
+      id: id,
+      name: raw.name || "Site",
+      cat: raw.cat || "streaming",
+      urls: urls,
+      star: !!(raw.star || raw.pick),
+      tags: raw.tags || "",
+      url: function () { return urls[0]; },
+      faviconUrl: function () {
+        try {
+          var host = new URL(urls[0]).hostname;
+          return "https://www.google.com/s2/favicons?sz=64&domain_url=" + encodeURIComponent(host);
+        } catch (e) {
+          return "";
+        }
       }
+    };
+  }
+
+  var allSitesCache = null;
+
+  function buildSitesList() {
+    if (allSitesCache) return allSitesCache;
+    var map = {};
+    var list = [];
+    BUILTIN_SITES.forEach(function (b) {
+      var s = hydrateSiteObject(b);
+      map[s.id] = s;
+      list.push(s);
+    });
+    var remoteCustom = Store.get("fmhy_remote_sites", []) || [];
+    remoteCustom.forEach(function (r) {
+      var s = hydrateSiteObject(r);
+      if (!map[s.id]) {
+        map[s.id] = s;
+        list.push(s);
+      }
+    });
+    allSitesCache = list;
+    return list;
+  }
+
+  // Initialize default starred sites on first run
+  function getStarredIds() {
+    var ids = Store.get("starred_site_ids", null);
+    if (!Array.isArray(ids)) {
+      ids = ["cineby", "rivestream", "miruro", "hianime", "thetvapp", "streamed"];
+      Store.set("starred_site_ids", ids);
     }
-    var rawTags = tail.replace(LINK_STRIP_RE, "").split("/");
-    for (var i = 0; i < rawTags.length; i++) {
-      var c = rawTags[i].replace(/[*_`]/g, "").trim();
-      if (c && c !== "," && c !== "↪️") s.tagList.push(c);
-    }
-    s.tags = s.tagList.join(" · ");
-    return s;
+    return ids;
   }
 
   var Sites = {
-    ROW_MAX: 14,
-    EMBED_SERVERS: EMBED_SERVERS,
-    deeplink: function (siteUrl, titleObj) {
-      if (!siteUrl || !titleObj) return null;
-      var host = "";
-      try {
-        host = new URL(siteUrl).hostname.replace(/^www\./, "");
-      } catch (e) {
-        return null;
-      }
-      var table = Object.assign({}, DEFAULT_DEEPLINKS, Store.get("deeplinks", {}) || {});
-      var site = table[host];
-      if (!site) return null;
-      var isSeries = titleObj.type === "series";
-      var tpl = site[isSeries ? "tv" : "movie"];
-      var imdb = String(titleObj.id || "").indexOf("tt") === 0 ? titleObj.id : "";
-      var tmdb = String(titleObj.tmdb || "");
-      if (!tpl) return null;
-      if (tpl.indexOf("{tmdb}") >= 0 && !tmdb) return null;
-      if (tpl.indexOf("{imdb}") >= 0 && !imdb) return null;
+    all: function () {
+      return buildSitesList();
+    },
+    byCategory: function (catId) {
+      return buildSitesList().filter(function (s) { return s.cat === catId; });
+    },
+    featured: function () {
+      return buildSitesList().filter(function (s) { return s.star; });
+    },
+    starred: function () {
+      var ids = getStarredIds();
+      var all = buildSitesList();
+      var out = [];
+      ids.forEach(function (id) {
+        for (var i = 0; i < all.length; i++) {
+          if (all[i].id === id) {
+            out.push(all[i]);
+            break;
+          }
+        }
+      });
+      return out;
+    },
+    isStarred: function (siteId) {
+      return getStarredIds().indexOf(siteId) !== -1;
+    },
+    toggleStar: function (siteId) {
+      var ids = getStarredIds().slice();
+      var idx = ids.indexOf(siteId);
+      if (idx >= 0) ids.splice(idx, 1);
+      else ids.push(siteId);
+      Store.set("starred_site_ids", ids);
+      return idx < 0;
+    },
+    search: function (query) {
+      var q = String(query || "").trim().toLowerCase();
+      if (!q) return [];
+      return buildSitesList().filter(function (s) {
+        return s.name.toLowerCase().indexOf(q) !== -1 ||
+               s.tags.toLowerCase().indexOf(q) !== -1 ||
+               s.urls[0].toLowerCase().indexOf(q) !== -1;
+      });
+    },
+    deeplink: function (siteUrl, query) {
+      if (!siteUrl) return "";
+      if (!query) return siteUrl;
       try {
         var u = new URL(siteUrl);
-        return u.protocol + "//" + u.host + tpl.replace("{tmdb}", tmdb).replace("{imdb}", imdb);
-      } catch (e) {
-        return null;
-      }
+        var host = u.hostname.replace(/^www\./, "");
+        var pat = SEARCH_PATTERNS[host];
+        if (pat) {
+          return u.protocol + "//" + u.host + pat.replace("{q}", encodeURIComponent(query));
+        }
+      } catch (e) {}
+      return siteUrl;
     },
-    embedUrlsForTitle: function (titleObj, season, episode) {
-      var id = titleObj.id || titleObj.tmdb || "";
-      var tmdb = titleObj.tmdb || titleObj.id || "";
-      var isSeries = titleObj.type === "series";
+    embedUrlsForTitle: function (type, imdbId, season, episode) {
+      var id = String(imdbId || "");
+      if (!id) return [];
+      var isSeries = type === "series";
       var s = season || 1;
       var e = episode || 1;
       return EMBED_SERVERS.map(function (srv) {
         var tpl = isSeries ? srv.tv : srv.movie;
-        var url = tpl
+        var u = tpl
           .replace(/\{id\}/g, encodeURIComponent(id))
-          .replace(/\{tmdb\}/g, encodeURIComponent(tmdb))
           .replace(/\{s\}/g, String(s))
           .replace(/\{e\}/g, String(e));
-        return { name: srv.name, url: url };
+        return { label: srv.label, name: srv.label, url: u };
       });
-    },
-    load: function () {
-      if (parsedSitesCache) return parsedSitesCache;
-      var out = {};
-      for (var i = 0; i < Cats.ORDER.length; i++) out[Cats.ORDER[i]] = [];
-      var md = Store.get("fmhy_video_md", "");
-      if (!md) return out;
-      var section = "";
-      var lines = md.split("\n");
-      for (var j = 0; j < lines.length; j++) {
-        var line = lines[j];
-        if (line.indexOf("#") === 0) {
-          section = line.replace(/^[#\s►▷]+/, "").trim();
-          continue;
-        }
-        var s = parseEntry(line, section);
-        if (!s) continue;
-        var cats = Cats.of(section, s.tagList);
-        for (var k = 0; k < cats.length; k++) {
-          var cat = cats[k];
-          if (!Sites.has(out[cat], s.url)) out[cat].push(s);
-        }
-      }
-      var catKeys = Object.keys(out);
-      for (var m = 0; m < catKeys.length; m++) {
-        var list = out[catKeys[m]];
-        var picks = [], rest = [], indexes = [];
-        for (var n = 0; n < list.length; n++) {
-          var item = list[n];
-          if (item.pick) picks.push(item);
-          else if (item.index) indexes.push(item);
-          else rest.push(item);
-        }
-        var combined = picks.concat(rest).concat(indexes);
-        if (combined.length === 0) delete out[catKeys[m]];
-        else out[catKeys[m]] = combined;
-      }
-      parsedSitesCache = out;
-      return out;
-    },
-    languages: function () {
-      if (parsedLangsCache) return parsedLangsCache;
-      var out = {};
-      var md = Store.get("fmhy_lang_md", "");
-      if (!md) return out;
-      var lang = null;
-      var streaming = false;
-      var lines = md.split("\n");
-      for (var i = 0; i < lines.length; i++) {
-        var line = lines[i];
-        if (line.indexOf("# ") === 0) {
-          lang = line.replace(/^[#\s►▷]+/, "").split(" / ")[0].trim();
-          streaming = false;
-        } else if (line.indexOf("#") === 0) {
-          streaming = line.replace(/^[#\s►▷]+/, "").trim().toLowerCase().indexOf("streaming") === 0;
-        } else if (lang && streaming) {
-          var s = parseEntry(line, lang);
-          if (!s) continue;
-          if (!out[lang]) out[lang] = [];
-          if (!Sites.has(out[lang], s.url)) out[lang].push(s);
-        }
-      }
-      var lKeys = Object.keys(out);
-      for (var k = 0; k < lKeys.length; k++) {
-        var list = out[lKeys[k]];
-        var picks = [], rest = [];
-        for (var j = 0; j < list.length; j++) {
-          if (list[j].pick) picks.push(list[j]);
-          else rest.push(list[j]);
-        }
-        out[lKeys[k]] = picks.concat(rest);
-      }
-      parsedLangsCache = out;
-      return out;
-    },
-    all: function () {
-      var out = [];
-      var byCat = Sites.load();
-      Object.keys(byCat).forEach(function (c) {
-        byCat[c].forEach(function (s) {
-          if (!Sites.has(out, s.url)) out.push(s);
-        });
-      });
-      var byLang = Sites.languages();
-      Object.keys(byLang).forEach(function (l) {
-        byLang[l].forEach(function (s) {
-          if (!Sites.has(out, s.url)) out.push(s);
-        });
-      });
-      Sites.favorites().forEach(function (s) {
-        if (!Sites.has(out, s.url)) out.push(s);
-      });
-      return out;
-    },
-    has: function (list, url) {
-      if (!list) return false;
-      for (var i = 0; i < list.length; i++) {
-        if (list[i].url === url) return true;
-      }
-      return false;
-    },
-    stale: function () {
-      var last = Store.get("fmhy_sites_ts", 0);
-      return !Store.get("fmhy_video_md", "") || (Date.now() - last > 12 * 3600 * 1000);
     },
     refresh: function () {
-      return Promise.all([
-        fetchText(SOURCE_VIDEO).catch(function () { return ""; }),
-        fetchText(SOURCE_LANG).catch(function () { return ""; })
-      ]).then(function (res) {
-        var videoMd = res[0];
-        var langMd = res[1];
-        var changed = false;
-        if (videoMd && videoMd.indexOf("Streaming Sites") >= 0) {
-          if (videoMd !== Store.get("fmhy_video_md", "")) changed = true;
-          Store.set("fmhy_video_md", videoMd);
-          parsedSitesCache = null;
-        }
-        if (langMd && langMd.indexOf("► ") >= 0) {
-          if (langMd !== Store.get("fmhy_lang_md", "")) changed = true;
-          Store.set("fmhy_lang_md", langMd);
-          parsedLangsCache = null;
-        }
-        if (videoMd || langMd) {
-          Store.set("fmhy_sites_ts", Date.now());
-        }
-        return changed;
-      });
+      var ENTRY_RE = /^\*\s*(⭐|🌟|🌐)?\s*(?:\*\*)?\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)(?:\*\*)?(.*)$/;
+      return fetchText("https://raw.githubusercontent.com/fmhy/edit/main/docs/video.md")
+        .then(function (md) {
+          if (!md || md.indexOf("Streaming") === -1) return false;
+          var lines = md.split(/\r?\n/);
+          var section = "";
+          var remoteSites = [];
+          for (var i = 0; i < lines.length; i++) {
+            var ln = lines[i].trim();
+            if (ln.indexOf("#") === 0) {
+              section = ln.replace(/^[#\s►▷]+/, "").trim();
+              continue;
+            }
+            var m = ENTRY_RE.exec(ln);
+            if (!m) continue;
+            var url = m[3];
+            if (/reddit\.com|github\.com|fmhy\.|discord\.gg/i.test(url)) continue;
+            var cat = "streaming";
+            if (/anime/i.test(section)) cat = "anime";
+            else if (/live|sport/i.test(section)) cat = "livetv";
+            else if (/cartoon/i.test(section)) cat = "cartoons";
+            else if (/drama/i.test(section)) cat = "drama";
+            else if (/docu/i.test(section)) cat = "docs";
+            remoteSites.push({
+              name: m[2].trim(),
+              cat: cat,
+              urls: [url],
+              star: !!m[1] && m[1] !== "🌐",
+              tags: section
+            });
+          }
+          if (remoteSites.length > 10) {
+            Store.set("fmhy_remote_sites", remoteSites.slice(0, 120));
+            Store.set("fmhy_sites_ts", Date.now());
+            Store.set("fmhy_sites_ver", new Date().toISOString().slice(0, 10));
+            allSitesCache = null;
+          }
+          return true;
+        })
+        .catch(function () { return false; });
     },
-    favorites: function () {
-      return Store.get("favs", []) || [];
+    remoteVersion: function () {
+      return Store.get("fmhy_sites_ver", "2026.11");
     },
-    isFavorite: function (url) {
-      var favs = Sites.favorites();
-      for (var i = 0; i < favs.length; i++) {
-        if (favs[i].url === url) return true;
-      }
-      return false;
-    },
-    toggleFavorite: function (site) {
-      var favs = Sites.favorites().slice();
-      var idx = -1;
-      for (var i = 0; i < favs.length; i++) {
-        if (favs[i].url === site.url) { idx = i; break; }
-      }
-      if (idx >= 0) {
-        favs.splice(idx, 1);
-      } else {
-        favs.push({
-          name: site.name,
-          url: site.url,
-          tags: site.tags || "",
-          mirrors: site.mirrors || []
-        });
-      }
-      Store.set("favs", favs);
-      return idx < 0;
-    },
-    addCustom: function (raw) {
-      var trimmed = String(raw || "").trim();
-      if (!trimmed) return;
-      var u = /^https?:\/\//i.test(trimmed) ? trimmed : "https://" + trimmed;
-      var host = u;
-      try {
-        host = new URL(u).hostname.replace(/^www\./, "");
-      } catch (e) {}
-      var site = { name: host, url: u, tags: "Custom site", mirrors: [] };
-      if (!Sites.isFavorite(u)) Sites.toggleFavorite(site);
-    },
-    clearFavorites: function () {
-      Store.set("favs", []);
+    lastCheck: function () {
+      return Store.get("fmhy_sites_ts", Date.now());
     }
   };
 
-  // ---- Catalog.java Port (Cinemeta Public Catalog) ----
+  // ---- Cinemeta Catalog (Catalog.java Port) ----
   var CINEMETA_BASE = "https://v3-cinemeta.strem.io";
   var catalogCache = {};
+  var posterCache = {};
 
-  function parseCatalogTitle(o, type) {
+  function parseCatalogItem(o, type) {
     if (!o) return null;
-    var t = {
+    var seasonsMap = {};
+    if (Array.isArray(o.videos)) {
+      o.videos.forEach(function (v) {
+        var sn = Number(v.season || 0);
+        var ep = Number(v.episode || v.number || 0);
+        if (sn < 1 || ep < 1) return;
+        if (!seasonsMap[sn]) seasonsMap[sn] = [];
+        seasonsMap[sn].push({
+          season: sn,
+          episode: ep,
+          name: v.name || v.title || ("Episode " + ep),
+          overview: v.overview || v.description || "",
+          thumb: v.thumbnail || "",
+          released: v.released ? String(v.released).slice(0, 10) : ""
+        });
+      });
+      Object.keys(seasonsMap).forEach(function (sn) {
+        seasonsMap[sn].sort(function (a, b) { return a.episode - b.episode; });
+      });
+    }
+    var g = o.genres || o.genre || [];
+    return {
       id: o.id || "",
       tmdb: o.moviedb_id > 0 ? String(o.moviedb_id) : "",
       type: type || o.type || "movie",
       name: o.name || "",
       year: String(o.releaseInfo || o.year || ""),
-      rating: String(o.imdbRating || ""),
+      rating: o.imdbRating ? String(o.imdbRating) : "",
       poster: String(o.poster || "").replace("/poster/small/", "/poster/medium/"),
-      background: o.background || "",
+      backdrop: o.background || "",
       overview: o.description || "",
       runtime: o.runtime || "",
-      genres: "",
-      episodes: []
+      genres: Array.isArray(g) ? g : [],
+      seasons: seasonsMap
     };
-    var g = o.genres || o.genre || [];
-    if (Array.isArray(g)) t.genres = g.join(" · ");
-    if (Array.isArray(o.videos)) {
-      for (var i = 0; i < o.videos.length; i++) {
-        var v = o.videos[i];
-        var season = Number(v.season || 0);
-        var number = Number(v.episode || v.number || 0);
-        if (season < 1 || number < 1) continue;
-        t.episodes.push({
-          season: season,
-          number: number,
-          title: v.name || v.title || "",
-          overview: v.overview || v.description || "",
-          thumb: v.thumbnail || ""
-        });
-      }
-      t.episodes.sort(function (a, b) {
-        return a.season !== b.season ? a.season - b.season : a.number - b.number;
-      });
-    }
-    return t;
   }
 
   var Catalog = {
     GENRES: [
-      "Action", "Adventure", "Animation", "Biography", "Comedy", "Crime",
-      "Documentary", "Drama", "Family", "Fantasy", "History", "Horror",
-      "Mystery", "Romance", "Sci-Fi", "Sport", "Thriller", "War", "Western"
+      "All", "Top IMDb", "Action", "Adventure", "Animation", "Biography",
+      "Comedy", "Crime", "Documentary", "Drama", "Family", "Fantasy",
+      "History", "Horror", "Mystery", "Romance", "Sci-Fi", "Sport", "Thriller"
     ],
-    cached: function (type, extra) {
-      var key = type + "|" + (extra || "");
-      return catalogCache[key] || null;
-    },
     list: function (type, extra) {
       extra = extra || "";
       var key = type + "|" + extra;
       if (catalogCache[key] && extra.indexOf("search=") !== 0) {
         return Promise.resolve(catalogCache[key]);
       }
-      var path = "/catalog/" + type + "/top" + (extra ? "/" + extra : "") + ".json";
+      var catalogId = extra.indexOf("top_rated") === 0 ? "imdbRating" : "top";
+      var cleanExtra = extra.replace(/^top_rated\/?/, "");
+      var path = "/catalog/" + type + "/" + catalogId + (cleanExtra ? "/" + cleanExtra : "") + ".json";
       return fetchText(CINEMETA_BASE + path, { useService: false })
         .catch(function () { return fetchText(CINEMETA_BASE + path, { forceService: true }); })
         .then(function (txt) {
@@ -604,647 +537,380 @@ window.FMHYData = (function () {
           var metas = (data && data.metas) || [];
           var out = [];
           for (var i = 0; i < metas.length; i++) {
-            var item = parseCatalogTitle(metas[i], type);
-            if (item && item.id && item.name) out.push(item);
+            var it = parseCatalogItem(metas[i], type);
+            if (it && it.id && it.name) {
+              out.push(it);
+              if (it.poster) posterCache[it.name.toLowerCase()] = it.poster;
+            }
           }
           if (extra.indexOf("search=") !== 0) catalogCache[key] = out;
           return out;
         })
-        .catch(function () {
-          return null;
-        });
+        .catch(function () { return []; });
     },
-    fill: function (titleObj) {
-      var path = "/meta/" + titleObj.type + "/" + titleObj.id + ".json";
+    trending: function (type, skip) {
+      return Catalog.list(type, skip > 0 ? ("skip=" + skip) : "");
+    },
+    topRated: function (type, skip) {
+      return Catalog.list(type, "top_rated" + (skip > 0 ? "/skip=" + skip : ""));
+    },
+    byGenre: function (type, genre, skip) {
+      var ex = "genre=" + encodeURIComponent(genre);
+      if (skip > 0) ex += "&skip=" + skip;
+      return Catalog.list(type, ex);
+    },
+    get: function (type, imdbId) {
+      var path = "/meta/" + type + "/" + encodeURIComponent(imdbId) + ".json";
       return fetchText(CINEMETA_BASE + path, { useService: false })
         .catch(function () { return fetchText(CINEMETA_BASE + path, { forceService: true }); })
         .then(function (txt) {
-          var full = parseCatalogTitle(JSON.parse(txt).meta, titleObj.type);
-          if (!full) return titleObj;
-          titleObj.overview = full.overview || titleObj.overview;
-          titleObj.runtime = full.runtime || titleObj.runtime;
-          titleObj.background = full.background || titleObj.background;
-          titleObj.genres = full.genres || titleObj.genres;
-          if (full.tmdb) titleObj.tmdb = full.tmdb;
-          if (full.year) titleObj.year = full.year;
-          if (full.rating) titleObj.rating = full.rating;
-          titleObj.episodes = full.episodes || [];
-          return titleObj;
+          var meta = (JSON.parse(txt) || {}).meta;
+          return parseCatalogItem(meta, type);
         })
-        .catch(function () {
-          return titleObj;
-        });
+        .catch(function () { return null; });
     },
-    seasons: function (titleObj) {
-      var max = 0;
-      var eps = (titleObj && titleObj.episodes) || [];
-      for (var i = 0; i < eps.length; i++) {
-        if (eps[i].season > max) max = eps[i].season;
-      }
-      return max;
+    posterFor: function (titleName) {
+      if (!titleName) return Promise.resolve("");
+      var k = String(titleName).trim().toLowerCase();
+      if (posterCache[k]) return Promise.resolve(posterCache[k]);
+      return Catalog.list("movie", "search=" + encodeURIComponent(titleName)).then(function (list) {
+        if (list && list.length > 0 && list[0].poster) {
+          posterCache[k] = list[0].poster;
+          return list[0].poster;
+        }
+        return "";
+      }).catch(function () { return ""; });
     },
-    mine: function () {
-      return Store.get("mylist", []) || [];
+    favorites: function () {
+      return Store.get("saved_catalog", []) || [];
     },
-    isMine: function (id) {
-      var list = Catalog.mine();
+    isFavorite: function (type, id) {
+      var list = Catalog.favorites();
       for (var i = 0; i < list.length; i++) {
         if (list[i].id === id) return true;
       }
       return false;
     },
-    toggleMine: function (t) {
-      var old = Catalog.mine();
-      var had = false;
-      var kept = [];
-      for (var i = 0; i < old.length; i++) {
-        if (old[i].id === t.id) had = true;
-        else kept.push(old[i]);
+    toggleFavorite: function (item) {
+      var list = Catalog.favorites().slice();
+      var idx = -1;
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].id === item.id) { idx = i; break; }
       }
-      if (!had) {
-        kept.unshift({
-          id: t.id,
-          tmdb: t.tmdb || "",
-          type: t.type || "movie",
-          name: t.name,
-          year: t.year || "",
-          rating: t.rating || "",
-          poster: t.poster || ""
+      if (idx >= 0) {
+        list.splice(idx, 1);
+      } else {
+        list.unshift({
+          id: item.id,
+          type: item.type || "movie",
+          name: item.name,
+          poster: item.poster || "",
+          year: item.year || "",
+          rating: item.rating || ""
         });
       }
-      Store.set("mylist", kept);
-      return !had;
+      Store.set("saved_catalog", list);
+      return idx < 0;
     }
   };
 
-  // ---- Iptv.java Port ----
-  var IPTV_MAIN = "https://iptv-org.github.io/iptv/index.m3u";
-  var DEFAULT_EXTRAS = "https://raw.githubusercontent.com/fmhyplay/sources/main/sources.txt";
-  var EMOJI_MAP = {
-    "General": "📺", "Other": "🗂", "News": "📰", "Entertainment": "🎭",
-    "Religious": "🙏", "Music": "🎵", "Movies": "🎬", "Series": "🎞",
-    "Sports": "⚽", "Kids": "🧸", "Documentary": "🌍", "Legislative": "🏛",
-    "Education": "🎓", "Comedy": "😂", "Culture": "🎨", "Lifestyle": "🌿",
-    "Shop": "🛍", "Business": "💼", "Animation": "🐭", "Outdoor": "🏕",
-    "Classic": "📻", "Travel": "✈️", "Family": "👨‍👩‍👧", "Cooking": "🍳",
-    "Auto": "🚗", "Weather": "⛅", "Science": "🔬", "Public": "🏙",
-    "Mature": "🔞", "My playlists": "📂", "Relax": "🧘", "Interactive": "🕹"
-  };
+  // ---- IPTV & Live TV (Iptv.java Port) ----
+  var IPTV_CATEGORIES = [
+    ["Sports", "sports", "⚽"],
+    ["News", "news", "📰"],
+    ["Movies", "movies", "🎬"],
+    ["Series", "series", "🎞"],
+    ["Entertainment", "entertainment", "🎭"],
+    ["Music", "music", "🎵"],
+    ["Kids", "kids", "🧸"],
+    ["Animation", "animation", "🐭"],
+    ["Documentary", "documentary", "🌍"],
+    ["Comedy", "comedy", "😂"],
+    ["Science", "science", "🔬"],
+    ["Education", "education", "🎓"],
+    ["Lifestyle", "lifestyle", "🌿"],
+    ["Cooking", "cooking", "🍳"],
+    ["Travel", "travel", "✈️"],
+    ["Auto", "auto", "🚗"],
+    ["Weather", "weather", "⛅"]
+  ];
 
-  var COUNTRY_NAMES = {};
-  try {
-    if (window.Intl && Intl.DisplayNames) {
-      var regionNames = new Intl.DisplayNames(["en"], { type: "region" });
-      COUNTRY_NAMES._intl = regionNames;
-    }
-  } catch (e) {}
+  var IPTV_COUNTRIES = [
+    ["United States", "us", "🇺🇸"],
+    ["United Kingdom", "uk", "🇬🇧"],
+    ["Canada", "ca", "🇨🇦"],
+    ["Australia", "au", "🇦🇺"],
+    ["Germany", "de", "🇩🇪"],
+    ["France", "fr", "🇫🇷"],
+    ["Spain", "es", "🇪🇸"],
+    ["Italy", "it", "🇮🇹"],
+    ["Brazil", "br", "🇧🇷"],
+    ["Mexico", "mx", "🇲🇽"],
+    ["Argentina", "ar", "🇦🇷"],
+    ["India", "in", "🇮🇳"],
+    ["Japan", "jp", "🇯🇵"],
+    ["South Korea", "kr", "🇰🇷"],
+    ["Saudi Arabia", "sa", "🇸🇦"],
+    ["UAE", "ae", "🇦🇪"],
+    ["Egypt", "eg", "🇪🇬"],
+    ["Turkey", "tr", "🇹🇷"],
+    ["Netherlands", "nl", "🇳🇱"],
+    ["Poland", "pl", "🇵🇱"],
+    ["Sweden", "se", "🇸🇪"],
+    ["Norway", "no", "🇳🇴"],
+    ["Denmark", "dk", "🇩🇰"],
+    ["Finland", "fi", "🇫🇮"],
+    ["Portugal", "pt", "🇵🇹"],
+    ["Greece", "gr", "🇬🇷"],
+    ["Romania", "ro", "🇷🇴"],
+    ["Philippines", "ph", "🇵🇭"],
+    ["Indonesia", "id", "🇮🇩"],
+    ["Malaysia", "my", "🇲🇾"]
+  ];
 
-  function countryFromCode(code) {
-    if (!code) return "";
-    var c = code.toLowerCase();
-    if (c === "uk") c = "gb";
-    var up = c.toUpperCase();
-    if (up.length !== 2) return up;
-    try {
-      if (COUNTRY_NAMES._intl) {
-        return COUNTRY_NAMES._intl.of(up) || up;
-      }
-    } catch (e) {}
-    return up;
-  }
-
-  function flagForCountryCode(code) {
-    if (!code || code.length !== 2) return "🏳";
-    var up = code.toUpperCase();
-    return String.fromCodePoint(0x1F1E6 + up.charCodeAt(0) - 65) +
-           String.fromCodePoint(0x1F1E6 + up.charCodeAt(1) - 65);
-  }
+  var playlistCache = {};
 
   function extractAttr(line, key) {
     var k = key + '="';
     var idx = line.indexOf(k);
-    while (idx >= 0) {
-      if (idx === 0 || line.charAt(idx - 1) === " ") {
-        var end = line.indexOf('"', idx + k.length);
-        return end < 0 ? "" : line.substring(idx + k.length, end);
-      }
-      idx = line.indexOf(k, idx + 1);
-    }
-    return "";
+    if (idx < 0) return "";
+    var end = line.indexOf('"', idx + k.length);
+    return end < 0 ? "" : line.substring(idx + k.length, end);
   }
 
-  function extractChannelName(line) {
-    var quoted = false;
-    var comma = -1;
-    for (var i = 0; i < line.length; i++) {
-      var ch = line.charAt(i);
-      if (ch === '"') quoted = !quoted;
-      else if (ch === "," && !quoted) comma = i;
-    }
-    return comma < 0 ? "" : line.substring(comma + 1).trim();
-  }
-
-  function cleanStreamMacros(u) {
-    var q = u.indexOf("?");
-    if (q < 0 || u.indexOf("[", q) < 0) return u;
-    var base = u.substring(0, q);
-    var parts = u.substring(q + 1).split("&");
-    var kept = [];
-    for (var i = 0; i < parts.length; i++) {
-      var p = parts[i];
-      var eq = p.indexOf("=");
-      var v = eq < 0 ? "" : p.substring(eq + 1);
-      if (v.charAt(0) === "[" && v.charAt(v.length - 1) === "]") continue;
-      kept.push(p);
-    }
-    return kept.length ? base + "?" + kept.join("&") : base;
-  }
-
-  function parseM3u(text, isAdult) {
+  function parseM3uText(text) {
     var out = [];
     if (!text) return out;
-    var c = null;
     var lines = String(text).split(/\r?\n/);
+    var cur = null;
     for (var i = 0; i < lines.length; i++) {
-      var line = lines[i].trim();
-      if (line.indexOf("#EXTINF") === 0) {
-        c = {
-          name: extractChannelName(line),
-          logo: extractAttr(line, "tvg-logo"),
-          ua: extractAttr(line, "http-user-agent"),
-          ref: extractAttr(line, "http-referrer"),
-          country: "",
-          countryCode: "",
-          group: extractAttr(line, "group-title"),
-          source: "",
-          playlist: "",
-          cats: ["Other"],
-          adult: !!isAdult
+      var ln = lines[i].trim();
+      if (ln.indexOf("#EXTINF") === 0) {
+        var comma = ln.lastIndexOf(",");
+        cur = {
+          name: comma >= 0 ? ln.substring(comma + 1).trim() : "Channel",
+          logo: extractAttr(ln, "tvg-logo"),
+          group: extractAttr(ln, "group-title") || "Live",
+          ua: extractAttr(ln, "http-user-agent"),
+          ref: extractAttr(ln, "http-referrer"),
+          url: ""
         };
-        var id = extractAttr(line, "tvg-id");
-        var dot = id.lastIndexOf(".");
-        if (!isAdult && dot >= 0) {
-          var rawCode = id.substring(dot + 1).replace(/@.*/, "");
-          if (rawCode.toLowerCase() === "uk") rawCode = "gb";
-          c.countryCode = rawCode.toUpperCase();
-          c.country = countryFromCode(rawCode);
+      } else if (cur && ln && ln.charAt(0) !== "#") {
+        if (ln.indexOf("http") === 0) {
+          cur.url = ln;
+          out.push(cur);
         }
-        var grp = isAdult ? "Mature" : c.group;
-        if (grp) c.cats = grp.split(";");
-        if (c.cats[0] === "Undefined" || !c.cats[0]) c.cats = ["Other"];
-      } else if (c && line.indexOf("#EXTVLCOPT:") === 0) {
-        if (line.indexOf("http-referrer=") >= 0) c.ref = line.substring(line.indexOf("http-referrer=") + 14);
-        else if (line.indexOf("http-user-agent=") >= 0) c.ua = line.substring(line.indexOf("http-user-agent=") + 16);
-      } else if (c && line && line.charAt(0) !== "#") {
-        var hasLetter = /[a-zA-Z\u00C0-\u024F\u0400-\u04FF\u0600-\u06FF]/.test(c.name);
-        var isOlero = /\bolero\b/i.test(c.name);
-        if (line.indexOf("http") === 0 && hasLetter && !isOlero) {
-          c.url = cleanStreamMacros(line);
-          out.push(c);
-        }
-        c = null;
+        cur = null;
       }
     }
     return out;
   }
 
-  var iptvMainRaw = "";
-  var iptvChannelsCache = null;
-  var countryFlagMap = {};
-
   var Iptv = {
-    MINE: "My playlists",
-    STREAMS: "My streams",
-    ADULT_NAME: "Mature",
-    loading: false,
-    sweeping: false,
-    sweepDone: 0,
-    sweepTotal: 0,
-
-    extrasUrl: function () {
-      return Store.get("extrasUrl", DEFAULT_EXTRAS);
+    CATEGORIES: IPTV_CATEGORIES,
+    COUNTRIES: IPTV_COUNTRIES,
+    categoryUrl: function (slug) {
+      return "https://iptv-org.github.io/iptv/categories/" + slug + ".m3u";
     },
-    adultAvailable: function () {
-      var extras = Store.get("iptv_extras_sources", []) || [];
-      for (var i = 0; i < extras.length; i++) {
-        if (extras[i].flag === "18") return true;
+    countryUrl: function (code) {
+      return "https://iptv-org.github.io/iptv/countries/" + code + ".m3u";
+    },
+    fetchPlaylist: function (url, forceRefresh) {
+      if (!url) return Promise.resolve([]);
+      if (!forceRefresh && playlistCache[url]) {
+        return Promise.resolve(playlistCache[url]);
+      }
+      return fetchText(url)
+        .then(function (txt) {
+          var list = parseM3uText(txt);
+          playlistCache[url] = list;
+          return list;
+        })
+        .catch(function () { return []; });
+    },
+    search: function (query) {
+      var q = String(query || "").trim().toLowerCase();
+      if (!q) return Promise.resolve([]);
+      return Iptv.fetchPlaylist("https://iptv-org.github.io/iptv/index.m3u", false)
+        .then(function (all) {
+          return all.filter(function (ch) {
+            return ch.name.toLowerCase().indexOf(q) !== -1 ||
+                   (ch.group && ch.group.toLowerCase().indexOf(q) !== -1);
+          }).slice(0, 120);
+        });
+    },
+    filterLive: function (channels, onBatch, abortSignal) {
+      if (!serviceOnline) {
+        if (onBatch) onBatch(channels, channels.length, channels.length);
+        return Promise.resolve(channels);
+      }
+      var batchSize = 20;
+      var total = channels.length;
+      var liveAll = [];
+
+      function runBatch(startIdx) {
+        if ((abortSignal && abortSignal.aborted) || startIdx >= total) {
+          return Promise.resolve(liveAll);
+        }
+        var slice = channels.slice(startIdx, startIdx + batchSize);
+        return fetch(SERVICE_URL + "/api/probe-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ channels: slice })
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (res) {
+            var map = (res && res.results) || {};
+            var liveSlice = slice.filter(function (ch) { return map[ch.url] !== false; });
+            liveAll = liveAll.concat(liveSlice);
+            if (onBatch) onBatch(liveSlice, Math.min(total, startIdx + batchSize), total);
+            return runBatch(startIdx + batchSize);
+          })
+          .catch(function () {
+            if (onBatch) onBatch(slice, Math.min(total, startIdx + batchSize), total);
+            return slice;
+          });
+      }
+      return runBatch(0);
+    },
+    favorites: function () {
+      return Store.get("iptv_fav_channels", []) || [];
+    },
+    isFavorite: function (url) {
+      var list = Iptv.favorites();
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].url === url) return true;
       }
       return false;
     },
-    adultOn: function () {
-      return Iptv.adultAvailable() && !!Store.get("adult", false);
-    },
-    hideDead: function () {
-      return Store.get("hideDead", true) !== false;
-    },
-    isDead: function (url) {
-      var health = Store.get("iptv_health", {}) || {};
-      var v = health[url];
-      return v !== undefined && v < 0 && (Date.now() + v < 2 * 24 * 3600 * 1000);
-    },
-    mark: function (url, works) {
-      var health = Store.get("iptv_health", {}) || {};
-      var now = Date.now();
-      health[url] = works ? now : -now;
-      Store.set("iptv_health", health);
-    },
-    played: function (url) {
-      var health = Store.get("iptv_health", {}) || {};
-      var good = Store.get("iptv_good", {}) || {};
-      var now = Date.now();
-      health[url] = now;
-      good[url] = now;
-      Store.set("iptv_health", health);
-      Store.set("iptv_good", good);
-    },
-    forgetWorking: function (url) {
-      var health = Store.get("iptv_health", {}) || {};
-      var good = Store.get("iptv_good", {}) || {};
-      delete health[url];
-      delete good[url];
-      Store.set("iptv_health", health);
-      Store.set("iptv_good", good);
-    },
-    deadCount: function () {
-      var all = Iptv.all(true);
-      var n = 0;
-      for (var i = 0; i < all.length; i++) {
-        if (Iptv.isDead(all[i].url)) n++;
-      }
-      return n;
-    },
-    statusLine: function () {
-      if (Iptv.sweeping) {
-        return "Checking channels… " + Iptv.sweepDone + " of " + Iptv.sweepTotal + " tested, offline ones are hidden";
-      }
-      var dead = Iptv.deadCount();
-      return dead > 0 && Iptv.hideDead() ? dead + " offline channels hidden" : "";
-    },
-    all: function (includeDead) {
-      if (!iptvChannelsCache) {
-        var out = parseM3u(iptvMainRaw, false);
-        var myPlaylists = Store.get("iptv_mine_data", {}) || {};
-        var myUrls = Iptv.mine();
-        for (var i = 0; i < myUrls.length; i++) {
-          var u = myUrls[i];
-          var parsedMine = parseM3u(myPlaylists[u] || "", false);
-          for (var j = 0; j < parsedMine.length; j++) {
-            parsedMine[j].cats = [Iptv.MINE];
-            parsedMine[j].playlist = u;
-            out.push(parsedMine[j]);
-          }
-        }
-        var extraData = Store.get("iptv_extra_m3u", {}) || {};
-        var extraSources = Store.get("iptv_extras_sources", []) || [];
-        for (var k = 0; k < extraSources.length; k++) {
-          var src = extraSources[k];
-          var isAd = src.flag === "18";
-          var parsedExtra = parseM3u(extraData[src.url] || "", isAd);
-          for (var m = 0; m < parsedExtra.length; m++) {
-            parsedExtra[m].source = src.label;
-            out.push(parsedExtra[m]);
-          }
-        }
-        for (var cIdx = 0; cIdx < out.length; cIdx++) {
-          if (out[cIdx].country && out[cIdx].countryCode && !countryFlagMap[out[cIdx].country]) {
-            countryFlagMap[out[cIdx].country] = flagForCountryCode(out[cIdx].countryCode);
-          }
-        }
-        out.sort(function (a, b) {
-          return a.name.localeCompare(b.name);
-        });
-        iptvChannelsCache = out;
-      }
-      if (includeDead) return iptvChannelsCache.slice();
-      var res = [];
-      var hide = Iptv.hideDead();
-      var allowAdult = Iptv.adultOn();
-      for (var idx = 0; idx < iptvChannelsCache.length; idx++) {
-        var ch = iptvChannelsCache[idx];
-        if ((allowAdult || !ch.adult) && !(hide && Iptv.isDead(ch.url))) {
-          res.push(ch);
-        }
-      }
-      return res;
-    },
-    working: function () {
-      var good = Store.get("iptv_good", {}) || {};
-      var health = Store.get("iptv_health", {}) || {};
-      var played = [], tested = [];
-      var list = Iptv.all();
+    toggleFavorite: function (ch) {
+      var list = Iptv.favorites().slice();
+      var idx = -1;
       for (var i = 0; i < list.length; i++) {
-        var c = list[i];
-        if (good[c.url]) played.push(c);
-        else if ((health[c.url] || 0) > 0) tested.push(c);
+        if (list[i].url === ch.url) { idx = i; break; }
       }
-      played.sort(function (a, b) { return (good[b.url] || 0) - (good[a.url] || 0); });
-      return played.concat(tested);
-    },
-    groups: function (by) {
-      var m = {};
-      var list = Iptv.all();
-      for (var i = 0; i < list.length; i++) {
-        var c = list[i];
-        var keys = by === "cat" ? c.cats : [c.country];
-        for (var j = 0; j < keys.length; j++) {
-          var k = keys[j];
-          if (!k || (by === "cat" && k === Iptv.MINE)) continue;
-          if (!m[k]) m[k] = [];
-          m[k].push(c);
-        }
-      }
-      var entries = Object.keys(m).map(function (k) { return [k, m[k]]; });
-      if (by === "cat") {
-        entries.sort(function (a, b) { return a[0].localeCompare(b[0]); });
-      } else {
-        entries.sort(function (a, b) { return b[1].length - a[1].length; });
-      }
-      var out = {};
-      for (var e = 0; e < entries.length; e++) {
-        out[entries[e][0]] = entries[e][1];
-      }
-      return out;
-    },
-    list: function (type, key) {
-      if (type === "fav") return Iptv.favorites();
-      if (type === "working") return Iptv.working();
-      if (type === "mine") {
-        return Iptv.all().filter(function (c) {
-          return c.cats[0] === Iptv.MINE && (!key || c.playlist === key || (key === Iptv.STREAMS && c.group === Iptv.STREAMS));
-        });
-      }
-      if (type === "cat" || type === "country") {
-        var g = Iptv.groups(type)[key];
-        return g ? g.slice() : [];
-      }
-      return Iptv.all();
-    },
-    emoji: function (cat) {
-      return EMOJI_MAP[cat] || "📡";
-    },
-    flag: function (countryName) {
-      return countryFlagMap[countryName] || "🏳";
-    },
-    favorites: function () {
-      var favUrls = Store.get("iptvfav", []) || [];
-      var set = {};
-      for (var i = 0; i < favUrls.length; i++) set[favUrls[i]] = true;
-      return Iptv.all().filter(function (c) { return !!set[c.url]; });
-    },
-    isFavorite: function (c) {
-      var favUrls = Store.get("iptvfav", []) || [];
-      return favUrls.indexOf(c.url) >= 0;
-    },
-    toggleFavorite: function (c) {
-      var favUrls = (Store.get("iptvfav", []) || []).slice();
-      var idx = favUrls.indexOf(c.url);
-      if (idx >= 0) favUrls.splice(idx, 1);
-      else favUrls.push(c.url);
-      Store.set("iptvfav", favUrls);
+      if (idx >= 0) list.splice(idx, 1);
+      else list.unshift({ name: ch.name, url: ch.url, logo: ch.logo || "", group: ch.group || "" });
+      Store.set("iptv_fav_channels", list);
       return idx < 0;
     },
-    history: function () {
-      var h = Store.get("iptvhist", []) || [];
-      var allowAdult = Iptv.adultOn();
-      return h.filter(function (c) { return allowAdult || !c.adult; });
+    recent: function () {
+      return Store.get("iptv_recent_channels", []) || [];
     },
-    recordHistory: function (c) {
-      var h = Iptv.history().filter(function (x) { return x.url !== c.url; });
-      h.unshift(c);
-      Store.set("iptvhist", h.slice(0, 20));
-    },
-    removeFromHistory: function (url) {
-      var h = Iptv.history().filter(function (x) { return x.url !== url; });
-      Store.set("iptvhist", h);
-    },
-    mine: function () {
-      return Store.get("iptvmine", []) || [];
-    },
-    playlistName: function (url) {
-      var names = Store.get("iptvnames", {}) || {};
-      if (names[url]) return names[url];
-      try {
-        var u = new URL(url);
-        if (u.pathname && u.pathname.slice(-15) === "/player_api.php") {
-          return u.host + " · Xtream (" + (u.searchParams.get("username") || "") + ")";
-        }
-      } catch (e) {}
-      return String(url).replace(/^https?:\/\//i, "");
-    },
-    xtreamUrl: function (server, user, pass) {
-      var base = String(server || "").trim().replace(/\/+(player_api\.php.*|get\.php.*)?$/i, "");
-      if (!/^https?:\/\/.+/i.test(base)) base = "http://" + base;
-      return base + "/player_api.php?username=" + encodeURIComponent(user.trim()) + "&password=" + encodeURIComponent(pass.trim());
-    },
-    addPlaylist: function (rawUrl, label) {
-      var url = String(rawUrl || "").trim();
-      if (!url) return Promise.resolve("Empty URL");
-      if (!/^https?:\/\/.+/i.test(url)) url = "https://" + url;
-      var current = Iptv.mine().slice();
-      if (current.indexOf(url) >= 0) return Promise.resolve("Already added");
-
-      var isXtream = url.indexOf("/player_api.php") >= 0;
-      var fetchPromise;
-      if (isXtream) {
-        fetchPromise = fetchText(url, { forceService: true }).then(function (loginTxt) {
-          var login = JSON.parse(loginTxt).user_info;
-          if (!login || Number(login.auth) !== 1) throw new Error("Xtream auth failed");
-          return Promise.all([
-            fetchText(url + "&action=get_live_categories", { forceService: true }),
-            fetchText(url + "&action=get_live_streams", { forceService: true })
-          ]).then(function (parts) {
-            var catsArr = JSON.parse(parts[0]);
-            var streamsArr = JSON.parse(parts[1]);
-            var catMap = {};
-            for (var i = 0; i < catsArr.length; i++) {
-              catMap[catsArr[i].category_id] = catsArr[i].category_name;
-            }
-            var u = new URL(url);
-            var base = url.substring(0, url.indexOf("/player_api.php")) + "/live/" +
-              encodeURIComponent(u.searchParams.get("username")) + "/" +
-              encodeURIComponent(u.searchParams.get("password")) + "/";
-            var m3u = ["#EXTM3U"];
-            for (var j = 0; j < streamsArr.length; j++) {
-              var s = streamsArr[j];
-              var grp = String(catMap[s.category_id] || "Live").replace(/"/g, "'");
-              m3u.push('#EXTINF:-1 tvg-logo="' + (s.stream_icon || "") + '" group-title="' + grp + '",' + String(s.name || "Channel").replace(/\n/g, " ").trim());
-              m3u.push(base + s.stream_id + ".m3u8");
-            }
-            return m3u.join("\n");
-          });
-        });
-      } else {
-        fetchPromise = fetchText(url);
+    played: function (url) {
+      if (!url) return;
+      var rec = Iptv.recent().slice();
+      var existing = null;
+      for (var i = 0; i < rec.length; i++) {
+        if (rec[i].url === url) { existing = rec.splice(i, 1)[0]; break; }
       }
-
-      return fetchPromise.then(function (text) {
-        if (!text || text.trim().indexOf("#EXTM3U") !== 0) {
-          return isXtream ? "Can't sign in: check server, username and password" : "Not a valid M3U playlist or stream link";
-        }
-        var parsed = parseM3u(text, false);
-        if (parsed.length === 0 && text.indexOf("#EXT-X-") >= 0) {
-          var streamTitle = (label && label.trim()) ? label.trim() : url.replace(/^https?:\/\//i, "");
-          text = '#EXTM3U\n#EXTINF:-1 group-title="' + Iptv.STREAMS + '",' + streamTitle + "\n" + url + "\n";
-          parsed = parseM3u(text, false);
-        }
-        if (parsed.length === 0) return "No channels in that playlist";
-        var names = Store.get("iptvnames", {}) || {};
-        if (label && label.trim()) names[url] = label.trim();
-        Store.set("iptvnames", names);
-
-        var mineData = Store.get("iptv_mine_data", {}) || {};
-        mineData[url] = text;
-        Store.set("iptv_mine_data", mineData);
-
-        current.push(url);
-        Store.set("iptvmine", current);
-        iptvChannelsCache = null;
-        return null;
-      }).catch(function () {
-        return isXtream ? "Can't sign in: check the server, username and password" : "Not a playlist or stream link, or it can't be reached";
-      });
+      if (existing) {
+        rec.unshift(existing);
+        Store.set("iptv_recent_channels", rec.slice(0, 24));
+      }
+    },
+    mark: function () {},
+    playlists: function () {
+      return Store.get("iptv_custom_playlists", []) || [];
+    },
+    addPlaylist: function (name, url) {
+      var u = String(url || "").trim();
+      if (!u) return;
+      if (!/^https?:\/\//i.test(u)) u = "https://" + u;
+      var n = String(name || "").trim() || u.replace(/^https?:\/\//i, "").slice(0, 28);
+      var list = Iptv.playlists().filter(function (p) { return p.url !== u; });
+      list.push({ name: n, url: u });
+      Store.set("iptv_custom_playlists", list);
+    },
+    addXtream: function (name, server, user, pass) {
+      var srv = String(server || "").trim().replace(/\/+$/, "");
+      if (!/^https?:\/\//i.test(srv)) srv = "http://" + srv;
+      var m3uUrl = srv + "/get.php?username=" + encodeURIComponent(user) + "&password=" + encodeURIComponent(pass) + "&type=m3u_plus&output=ts";
+      Iptv.addPlaylist(name || (user + " @ Xtream"), m3uUrl);
     },
     removePlaylist: function (url) {
-      var current = Iptv.mine().filter(function (u) { return u !== url; });
-      Store.set("iptvmine", current);
-      var names = Store.get("iptvnames", {}) || {};
-      delete names[url];
-      Store.set("iptvnames", names);
-      var mineData = Store.get("iptv_mine_data", {}) || {};
-      delete mineData[url];
-      Store.set("iptv_mine_data", mineData);
-      iptvChannelsCache = null;
+      var list = Iptv.playlists().filter(function (p) { return p.url !== url; });
+      Store.set("iptv_custom_playlists", list);
     },
     refresh: function () {
-      Iptv.loading = true;
-      var extUrl = Iptv.extrasUrl();
-      return fetchText(IPTV_MAIN)
-        .then(function (mainM3u) {
-          if (mainM3u && mainM3u.trim().indexOf("#EXTM3U") === 0) {
-            iptvMainRaw = mainM3u;
-            iptvChannelsCache = null;
-          }
-          if (!extUrl) return true;
-          return fetchText(extUrl).then(function (extrasTxt) {
-            var lines = String(extrasTxt || "").split(/\r?\n/);
-            var sources = [];
-            var deeplinksUrl = "";
-            for (var i = 0; i < lines.length; i++) {
-              var ln = lines[i].trim();
-              if (!ln || ln.charAt(0) === "#") continue;
-              var parts = ln.split("|");
-              if (parts.length >= 2 && parts[0] === "@deeplinks") {
-                deeplinksUrl = parts[1].trim();
-              } else if (parts.length >= 2 && parts[1].indexOf("http") === 0) {
-                sources.push({ label: parts[0], url: parts[1].trim(), flag: (parts[2] || "").trim() });
-              }
-            }
-            Store.set("iptv_extras_sources", sources);
-            if (deeplinksUrl) {
-              fetchText(deeplinksUrl).then(function (dlJson) {
-                try { Store.set("deeplinks", JSON.parse(dlJson)); } catch (e) {}
-              }).catch(function () {});
-            }
-            return true;
-          }).catch(function () { return true; });
-        })
-        .then(function () {
-          Iptv.loading = false;
-          iptvChannelsCache = null;
-          return iptvMainRaw.length > 0;
-        })
-        .catch(function () {
-          Iptv.loading = false;
-          return false;
-        });
-    },
-    sweep: function (onProgress) {
-      if (Iptv.sweeping) return;
-      var all = Iptv.all(true);
-      if (all.length === 0) return;
-      Iptv.sweeping = true;
-      var favs = Iptv.favorites();
-      var hist = Iptv.history();
-      var prioritySet = {};
-      favs.forEach(function (c) { prioritySet[c.url] = true; });
-      hist.forEach(function (c) { prioritySet[c.url] = true; });
-
-      var priority = [];
-      var rest = [];
-      for (var i = 0; i < all.length; i++) {
-        if (prioritySet[all[i].url]) priority.push(all[i]);
-        else rest.push(all[i]);
-      }
-      // Probe up to 160 channels per sweep in browser/service mode so TV stays snappy
-      var todo = priority.concat(rest.slice(0, 160));
-      Iptv.sweepDone = 0;
-      Iptv.sweepTotal = todo.length;
-
-      function nextBatch(idx) {
-        if (idx >= todo.length) {
-          Iptv.sweeping = false;
-          if (onProgress) onProgress();
-          return;
-        }
-        var batch = todo.slice(idx, idx + 16);
-        if (serviceOnline) {
-          fetch(SERVICE_URL + "/api/probe-batch", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ channels: batch })
-          })
-            .then(function (r) { return r.json(); })
-            .then(function (res) {
-              var map = (res && res.results) || {};
-              Object.keys(map).forEach(function (u) {
-                Iptv.mark(u, !!map[u]);
-              });
-              Iptv.sweepDone += batch.length;
-              if (onProgress) onProgress();
-              nextBatch(idx + 16);
-            })
-            .catch(function () {
-              Iptv.sweeping = false;
-            });
-        } else {
-          Iptv.sweeping = false;
-        }
-      }
-      nextBatch(0);
+      playlistCache = {};
+      return Promise.resolve(true);
     }
   };
 
-  // ---- Subs.java Port (OpenSubtitles v3 Public Addon) ----
+  // ---- OpenSubtitles v3 & Subtitle Styling (Subs.java Port) ----
   var OPENSUBS_BASE = "https://opensubtitles-v3.strem.io/subtitles/";
-  var ODD_LANGS = {
-    "pob": "Portuguese (Brazil)", "zht": "Chinese (Traditional)", "zhc": "Chinese (Cantonese)",
-    "zhe": "Chinese (bilingual)", "spl": "Spanish (Latin America)", "spn": "Spanish (Spain)",
-    "pom": "Portuguese", "eng": "English", "spa": "Spanish", "fre": "French", "fra": "French",
-    "ger": "German", "deu": "German", "ita": "Italian", "rus": "Russian", "ara": "Arabic",
-    "tur": "Turkish", "jpn": "Japanese", "kor": "Korean", "hin": "Hindi", "pol": "Polish",
-    "dut": "Dutch", "nld": "Dutch", "swe": "Swedish", "nor": "Norwegian", "dan": "Danish",
-    "fin": "Finnish", "gre": "Greek", "heb": "Hebrew", "ind": "Indonesian", "vie": "Vietnamese",
-    "tha": "Thai", "ces": "Czech", "cze": "Czech", "hun": "Hungarian", "ron": "Romanian",
-    "rum": "Romanian", "ukr": "Ukrainian", "fas": "Persian", "per": "Persian"
-  };
+  var SUB_LANGS = [
+    ["eng", "English"],
+    ["ara", "Arabic"],
+    ["spa", "Spanish"],
+    ["fre", "French"],
+    ["ger", "German"],
+    ["ita", "Italian"],
+    ["por", "Portuguese"],
+    ["pob", "Portuguese (Brazil)"],
+    ["rus", "Russian"],
+    ["tur", "Turkish"],
+    ["jpn", "Japanese"],
+    ["kor", "Korean"],
+    ["hin", "Hindi"],
+    ["pol", "Polish"],
+    ["nld", "Dutch"],
+    ["swe", "Swedish"],
+    ["ind", "Indonesian"],
+    ["vie", "Vietnamese"]
+  ];
 
   var Subs = {
+    LANGS: SUB_LANGS,
     delayMs: 0,
-    size: function () { return Number(Store.get("subSize", 100)); },
-    setSize: function (v) { Store.set("subSize", Math.max(50, Math.min(250, v))); },
-    sizeLabel: function () { var s = Subs.size(); return s === 100 ? "Default" : s + "%"; },
-    offset: function () { return Number(Store.get("subOffset", 0)); },
-    setOffset: function (v) { Store.set("subOffset", Math.max(-80, Math.min(200, v))); },
-    offsetLabel: function () { var o = Subs.offset(); return o === 0 ? "Default" : (o > 0 ? "Up " : "Down ") + Math.abs(o); },
-    delayLabel: function () { return Subs.delayMs === 0 ? "In sync" : ((Subs.delayMs > 0 ? "+" : "") + (Subs.delayMs / 1000).toFixed(1) + " s"); },
-    reset: function () {
-      Store.set("subSize", 100);
-      Store.set("subOffset", 0);
+    preferredLang: function () {
+      return Store.get("sub_lang", "eng");
+    },
+    setPreferredLang: function (code) {
+      Store.set("sub_lang", code || "eng");
+    },
+    size: function () {
+      return Number(Store.get("subSize", 100));
+    },
+    setSize: function (v) {
+      // Support both +/-1 step calls and explicit percentage calls
+      var cur = Subs.size();
+      var next = Math.abs(v - cur) <= 2 ? (cur + (v > cur ? 15 : -15)) : v;
+      if (v === 1) next = 100;
+      Store.set("subSize", Math.max(60, Math.min(220, next)));
+    },
+    sizeLabel: function () {
+      var s = Subs.size();
+      return s === 100 ? "Default (100%)" : s + "%";
+    },
+    offset: function () {
+      return Number(Store.get("subOffset", 0));
+    },
+    setOffset: function (v) {
+      var cur = Subs.offset();
+      var next = Math.abs(v - cur) <= 2 ? (cur + (v > cur ? 15 : -15)) : v;
+      if (v === 1) next = 0;
+      Store.set("subOffset", Math.max(-75, Math.min(180, next)));
+    },
+    offsetLabel: function () {
+      var o = Subs.offset();
+      return o === 0 ? "Default" : (o > 0 ? "Up +" + o + "px" : "Down " + o + "px");
+    },
+    stepDelay: function (deltaMs) {
+      Subs.delayMs += Number(deltaMs || 0);
+    },
+    resetDelay: function () {
       Subs.delayMs = 0;
     },
+    delayLabel: function () {
+      return Subs.delayMs === 0 ? "In sync (0.0s)" : ((Subs.delayMs > 0 ? "+" : "") + (Subs.delayMs / 1000).toFixed(1) + "s");
+    },
     languageName: function (iso3) {
-      var code = String(iso3 || "und").toLowerCase();
-      if (ODD_LANGS[code]) return ODD_LANGS[code];
+      var code = String(iso3 || "eng").toLowerCase();
+      for (var i = 0; i < SUB_LANGS.length; i++) {
+        if (SUB_LANGS[i][0] === code) return SUB_LANGS[i][1];
+      }
       return code.toUpperCase();
     },
     find: function (imdb, season, episode) {
@@ -1252,93 +918,67 @@ window.FMHYData = (function () {
       return fetchText(OPENSUBS_BASE + path + ".json")
         .then(function (txt) {
           var arr = (JSON.parse(txt) || {}).subtitles || [];
-          var out = [];
-          for (var i = 0; i < arr.length; i++) {
-            var o = arr[i];
-            if (!o.url) continue;
-            out.push({
+          return arr.filter(function (o) { return !!o.url; }).map(function (o, idx) {
+            return {
               url: o.url,
-              lang: o.lang || "und",
-              release: o.subtitleFileName || o.movieReleaseName || ("Subtitle " + (i + 1))
-            });
-          }
-          return out;
+              lang: o.lang || "eng",
+              release: o.subtitleFileName || o.movieReleaseName || ("Subtitle #" + (idx + 1))
+            };
+          });
         })
-        .catch(function () { return null; });
+        .catch(function () { return []; });
     },
     byLanguage: function (allSubs) {
       var m = {};
-      for (var i = 0; i < allSubs.length; i++) {
-        var s = allSubs[i];
+      var pref = Subs.preferredLang();
+      (allSubs || []).forEach(function (s) {
         if (!m[s.lang]) m[s.lang] = [];
         m[s.lang].push(s);
-      }
-      var keys = Object.keys(m);
-      keys.sort(function (a, b) {
-        var rankA = (a === "eng" ? 1000 : 0) + m[a].length;
-        var rankB = (b === "eng" ? 1000 : 0) + m[b].length;
-        return rankB - rankA;
+      });
+      var keys = Object.keys(m).sort(function (a, b) {
+        var ra = (a === pref ? 2000 : (a === "eng" ? 1000 : 0)) + m[a].length;
+        var rb = (b === pref ? 2000 : (b === "eng" ? 1000 : 0)) + m[b].length;
+        return rb - ra;
       });
       var out = {};
-      for (var j = 0; j < keys.length; j++) out[keys[j]] = m[keys[j]];
+      keys.forEach(function (k) { out[k] = m[k]; });
       return out;
     }
   };
 
-  // ---- Simkl.java Port ----
+  // ---- Simkl Sync (Simkl.java Port) ----
   var SIMKL_CLIENT_ID = "fdc9c9da795fdb1d5fd717f714a8f793d88e86f3ee24a935b8c76d10c21bb36c";
   var SIMKL_API = "https://api.simkl.com";
 
   var Simkl = {
-    signedIn: function () {
+    isConnected: function () {
       return !!Store.get("simklToken", "");
     },
-    signOut: function () {
+    disconnect: function () {
       Store.remove("simklToken");
-      Store.remove("simklRefresh");
-      Store.remove("simklUntil");
     },
-    newCode: function () {
-      var url = SIMKL_API + "/oauth2/device?client_id=" + SIMKL_CLIENT_ID + "&scope=media:read%20media:write";
-      return fetchText(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: "client_id=" + encodeURIComponent(SIMKL_CLIENT_ID) + "&scope=media%3Aread%20media%3Awrite"
-      })
+    startAuth: function () {
+      var url = SIMKL_API + "/oauth/pin?client_id=" + SIMKL_CLIENT_ID;
+      return fetchText(url)
         .then(function (txt) {
           var o = JSON.parse(txt);
-          if (!o.user_code) return null;
+          if (!o || !o.user_code) return null;
           return {
-            user: o.user_code,
-            device: o.device_code,
-            page: o.verification_uri || "https://simkl.com/pin",
-            interval: Math.max(5, Number(o.interval || 5)),
-            until: Date.now() + Number(o.expires_in || 900) * 1000
+            user_code: o.user_code,
+            verification_url: o.verification_url || "https://simkl.com/pin"
           };
         })
         .catch(function () { return null; });
     },
-    check: function (codeObj) {
-      if (!codeObj || Date.now() > codeObj.until) return Promise.resolve("expired");
-      var body = "grant_type=" + encodeURIComponent("urn:ietf:params:oauth:grant-type:device_code") +
-                 "&client_id=" + encodeURIComponent(SIMKL_CLIENT_ID) +
-                 "&device_code=" + encodeURIComponent(codeObj.device);
-      return fetchText(SIMKL_API + "/oauth2/token?client_id=" + SIMKL_CLIENT_ID, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: body
-      })
+    pollCode: function (userCode) {
+      var url = SIMKL_API + "/oauth/pin/" + encodeURIComponent(userCode) + "?client_id=" + SIMKL_CLIENT_ID;
+      return fetchText(url)
         .then(function (txt) {
           var o = JSON.parse(txt);
-          if (o.access_token) {
+          if (o && o.result === "OK" && o.access_token) {
             Store.set("simklToken", o.access_token);
-            Store.set("simklRefresh", o.refresh_token || "");
-            Store.set("simklUntil", Date.now() + Number(o.expires_in || 604800) * 1000);
             return "ok";
           }
-          if (o.error === "authorization_pending") return "wait";
-          if (o.error === "slow_down") return "slow";
-          if (o.error === "expired_token") return "expired";
           return "wait";
         })
         .catch(function () { return "wait"; });
@@ -1356,7 +996,7 @@ window.FMHYData = (function () {
         payload.show = ids;
         payload.episode = { season: episodeArr[0], number: episodeArr[1] };
       }
-      fetchText(SIMKL_API + "/scrobble/" + action + "?client_id=" + SIMKL_CLIENT_ID + "&app-name=fmhyplay-tizen&app-version=1.0.0", {
+      fetchText(SIMKL_API + "/scrobble/" + action + "?client_id=" + SIMKL_CLIENT_ID, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1374,103 +1014,85 @@ window.FMHYData = (function () {
     }
   };
 
-  // ---- History.java Port ----
+  // ---- Watch History (History.java Port) ----
   var EP_TEXT_RE = /\b(?:S(\d{1,2})\s*E(\d{1,4})|Season\s*(\d+)\W*Episode\s*(\d+)|(?:Episode|Ep\.?)\s*(\d+))\b/i;
-  var JUNK_TAIL_RE = /\s+(online|free|hd|streaming|full movie|for free|eng(lish)? sub(bed)?|subbed|dubbed)\b.*$/i;
 
   var History = {
-    list: function () {
-      return Store.get("history", []) || [];
+    all: function () {
+      return Store.get("watch_history", []) || [];
     },
-    save: function (list) {
-      Store.set("history", (list || []).slice(0, 60));
+    list: function () {
+      return History.all();
+    },
+    hostLabel: function (url) {
+      try {
+        return new URL(url).hostname.replace(/^www\./, "");
+      } catch (e) {
+        return String(url || "Site");
+      }
     },
     cleanTitle: function (rawTitle, siteName) {
-      var t = String(rawTitle || "");
+      var t = String(rawTitle || "").trim();
       var s = String(siteName || "").toLowerCase();
       var parts = t.split(/\s+[|–—•·-]\s+/);
-      var best = "";
       for (var i = 0; i < parts.length; i++) {
         var p = parts[i].trim();
-        if (!p || (s && p.toLowerCase().indexOf(s) >= 0)) continue;
-        best = p;
-        break;
+        if (p && (!s || p.toLowerCase().indexOf(s) === -1)) return p;
       }
-      if (!best) best = t.trim();
-      best = best.replace(/^(watch|stream)\s+/i, "");
-      return best.replace(JUNK_TAIL_RE, "").trim();
+      return t;
     },
     episode: function (url, title) {
-      var u = String(url || "");
-      var m1 = /\/(?:tv|series|show)\/[^/?#]+\/(\d{1,2})\/(\d{1,4})(?:[/?#]|$)/i.exec(u) ||
-               /season[-/=](\d+).*?episode[-/=](\d+)/i.exec(u) ||
-               /[?&]s=(\d+).*?[?&]e=(\d+)/i.exec(u);
-      if (m1) return "S" + parseInt(m1[1], 10) + " E" + parseInt(m1[2], 10);
-      var mt = EP_TEXT_RE.exec(String(title || ""));
-      if (mt) {
-        if (mt[1]) return "S" + parseInt(mt[1], 10) + " E" + parseInt(mt[2], 10);
-        if (mt[3]) return "S" + parseInt(mt[3], 10) + " E" + parseInt(mt[4], 10);
-        return "E" + parseInt(mt[5], 10);
-      }
-      var me = /(?:episode|ep)[-/=](\d+)/i.exec(u);
-      return me ? "E" + parseInt(me[1], 10) : "";
+      var m = EP_TEXT_RE.exec(String(title || "") + " " + String(url || ""));
+      if (!m) return "";
+      if (m[1]) return "S" + parseInt(m[1], 10) + " E" + parseInt(m[2], 10);
+      if (m[3]) return "S" + parseInt(m[3], 10) + " E" + parseInt(m[4], 10);
+      return "E" + parseInt(m[5], 10);
     },
-    record: function (entryObj) {
-      if (!entryObj || !entryObj.title) return;
-      var list = History.list().slice();
-      var title = History.cleanTitle(entryObj.title, entryObj.site || "");
-      title = title.replace(EP_TEXT_RE, "").replace(/[\s:,|–-]+$/, "").trim();
-      if (title.length < 2) return;
-      var ep = entryObj.episode || History.episode(entryObj.url, entryObj.title);
-      var existingIdx = -1;
-      for (var i = 0; i < list.length; i++) {
-        if (list[i].title.toLowerCase() === title.toLowerCase()) {
-          existingIdx = i;
-          break;
-        }
-      }
-      var item = existingIdx >= 0 ? list.splice(existingIdx, 1)[0] : {};
-      item.site = entryObj.site || item.site || "FMHYPlay";
-      item.siteUrl = entryObj.siteUrl || item.siteUrl || "";
-      item.title = title;
-      item.url = entryObj.url || item.url || "";
-      item.image = entryObj.image || item.image || "";
-      item.episode = ep || item.episode || "";
-      item.imdb = entryObj.imdb || item.imdb || "";
-      item.tmdb = entryObj.tmdb || item.tmdb || "";
-      item.type = entryObj.type || item.type || "movie";
-      item.seasonNum = entryObj.seasonNum || item.seasonNum || 0;
-      item.episodeNum = entryObj.episodeNum || item.episodeNum || 0;
-      item.time = Date.now();
-      list.unshift(item);
-      History.save(list);
-    },
-    remove: function (entry) {
-      var list = History.list().filter(function (x) {
-        return !(x.site === entry.site && x.title === entry.title);
+    record: function (urlOrObj, title, siteName, ep) {
+      var u = typeof urlOrObj === "object" ? urlOrObj.url : urlOrObj;
+      var t = typeof urlOrObj === "object" ? urlOrObj.title : title;
+      var s = typeof urlOrObj === "object" ? urlOrObj.site : siteName;
+      var e = typeof urlOrObj === "object" ? urlOrObj.ep : ep;
+      if (!u || !t) return;
+      var list = History.all().filter(function (x) { return x.url !== u && x.title !== t; });
+      list.unshift({
+        url: u,
+        title: t,
+        site: s || History.hostLabel(u),
+        ep: e || "",
+        time: Date.now()
       });
-      History.save(list);
+      Store.set("watch_history", list.slice(0, 40));
     },
-    relativeTime: function (ts) {
-      var diffSec = Math.max(1, Math.floor((Date.now() - ts) / 1000));
-      if (diffSec < 60) return "just now";
-      var min = Math.floor(diffSec / 60);
-      if (min < 60) return min + " min ago";
-      var hr = Math.floor(min / 60);
-      if (hr < 24) return hr + (hr === 1 ? " hr ago" : " hrs ago");
-      var d = Math.floor(hr / 24);
-      return d + (d === 1 ? " day ago" : " days ago");
+    remove: function (url) {
+      var list = History.all().filter(function (x) { return x.url !== url; });
+      Store.set("watch_history", list);
+    },
+    clear: function () {
+      Store.set("watch_history", []);
     }
   };
+
+  function init() {
+    // Start service check, and kick off non-blocking site refresh in background
+    return initService().then(function () {
+      if (Date.now() - Store.get("fmhy_sites_ts", 0) > 12 * 3600 * 1000) {
+        Sites.refresh();
+      }
+      return true;
+    });
+  }
 
   return {
     SERVICE_URL: SERVICE_URL,
     isServiceOnline: function () { return serviceOnline; },
+    init: init,
     initService: initService,
     fetchText: fetchText,
     proxyStreamUrl: proxyStreamUrl,
     proxyPageUrl: proxyPageUrl,
     colorFor: colorFor,
+    colorHash: colorFor,
     Store: Store,
     Cats: Cats,
     Sites: Sites,

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=1920, height=1080, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>FMHYPlay — Samsung Tizen TV (TizenBrew)</title>
-  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/style.css?v=1.0.2" />
   <!-- HLS.js & dash.js for adaptive streaming in Tizen WebEngine -->
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dashjs@4.7.4/dist/dash.all.min.js"></script>
@@ -73,20 +73,20 @@
 
         <div class="player-bottombar">
           <div id="player-seek-row" class="player-seek-row">
-            <div id="player-time-pos" class="player-time">0:00</div>
+            <div id="player-time-cur" class="player-time">0:00</div>
             <div id="player-seek-track">
               <div id="player-seek-fill"></div>
             </div>
-            <div id="player-time-dur" class="player-time">0:00</div>
+            <div id="player-time-tot" class="player-time">0:00</div>
           </div>
 
           <div id="player-chip-row">
-            <div id="pchip-servers" class="player-chip" style="display: none;">⧉ Servers</div>
-            <div id="pchip-quality" class="player-chip">⚙ Auto</div>
-            <div id="pchip-audio" class="player-chip" style="display: none;">♪ Audio</div>
-            <div id="pchip-subs" class="player-chip">💬 Subtitles</div>
-            <div id="pchip-speed" class="player-chip">▸▸ 1x</div>
-            <div id="pchip-zoom" class="player-chip">⛶ Fit</div>
+            <div id="pchip-servers" class="player-chip" style="display: none;">⧉ <span class="pchip-val">Servers</span></div>
+            <div id="pchip-quality" class="player-chip">⚙ <span class="pchip-val">Auto</span></div>
+            <div id="pchip-audio" class="player-chip" style="display: none;">♪ <span class="pchip-val">AUD</span></div>
+            <div id="pchip-subs" class="player-chip">💬 <span class="pchip-val">Off</span></div>
+            <div id="pchip-speed" class="player-chip">▸▸ <span class="pchip-val">1x</span></div>
+            <div id="pchip-zoom" class="player-chip">⛶ <span class="pchip-val">Fit</span></div>
           </div>
         </div>
       </div>
@@ -100,9 +100,9 @@
   <div id="toast-box"></div>
 
   <!-- FMHYPlay Application Scripts -->
-  <script src="js/data.js"></script>
-  <script src="js/player.js"></script>
-  <script src="js/browser.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/data.js?v=1.0.2"></script>
+  <script src="js/player.js?v=1.0.2"></script>
+  <script src="js/browser.js?v=1.0.2"></script>
+  <script src="js/app.js?v=1.0.2"></script>
 </body>
 </html>

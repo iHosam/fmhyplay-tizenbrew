@@ -84,8 +84,15 @@ window.FMHYApp = (function () {
     return node;
   }
 
+  function isConnectedNode(node) {
+    if (!node) return false;
+    if (typeof node.isConnected === "boolean") return node.isConnected;
+    var root = el("app-root") || document.body;
+    return root ? root.contains(node) : true;
+  }
+
   function isVisible(node) {
-    if (!node || !node.isConnected) return false;
+    if (!node || !isConnectedNode(node)) return false;
     if (node.style && node.style.display === "none") return false;
     var r = node.getBoundingClientRect();
     return r.width > 0 && r.height > 0;
@@ -873,7 +880,7 @@ window.FMHYApp = (function () {
     rowEl.appendChild(loading);
 
     FMHYData.Catalog.trending(type).then(function (items) {
-      if (!rowEl.isConnected) return;
+      if (!isConnectedNode(rowEl)) return;
       clearNode(rowEl);
       state.catalogCache[cacheKey] = items || [];
       (items || []).slice(0, 18).forEach(function (it) {
@@ -928,7 +935,7 @@ window.FMHYApp = (function () {
     else p = FMHYData.Catalog.byGenre(type, st.genre, st.skip);
 
     p.then(function (list) {
-      if (!grid.isConnected) return;
+      if (!isConnectedNode(grid)) return;
       if (!append) {
         clearNode(grid);
         st.items = [];
@@ -1088,7 +1095,7 @@ window.FMHYApp = (function () {
           }
 
           srcPromise.then(function (list) {
-            if (!grid.isConnected) return;
+            if (!isConnectedNode(grid)) return;
             allLoaded = list || [];
             if (!useLiveFilter || mode === "favorites" || mode === "recent") {
               renderChannelList(allLoaded);
@@ -1099,7 +1106,7 @@ window.FMHYApp = (function () {
             var liveList = [];
             statusEl.textContent = "Probing " + Math.min(allLoaded.length, 160) + " streams…";
             FMHYData.Iptv.filterLive(allLoaded.slice(0, 160), function (liveBatch, checked, total) {
-              if (!grid.isConnected || abortSignal.aborted) return;
+              if (!isConnectedNode(grid) || abortSignal.aborted) return;
               liveBatch.forEach(function (ch) {
                 liveList.push(ch);
                 var q = inp.value.trim().toLowerCase();
@@ -1109,7 +1116,7 @@ window.FMHYApp = (function () {
               });
               statusEl.textContent = liveList.length + " live (" + checked + "/" + total + " checked)";
             }, abortSignal).then(function () {
-              if (!grid.isConnected || abortSignal.aborted) return;
+              if (!isConnectedNode(grid) || abortSignal.aborted) return;
               allLoaded = liveList;
               statusEl.textContent = liveList.length + " live channels ready";
             });
@@ -1388,7 +1395,7 @@ window.FMHYApp = (function () {
         container.appendChild(loading);
 
         FMHYData.Catalog.get(type, imdbId).then(function (detail) {
-          if (!container.isConnected) return;
+          if (!isConnectedNode(container)) return;
           clearNode(container);
           container.appendChild(backRow);
 
@@ -1652,7 +1659,7 @@ window.FMHYApp = (function () {
           addSectionHeader(resultsBox, "Movies");
           var mRow = addHorizontalRow(resultsBox);
           FMHYData.Catalog.list("movie", "search=" + encodeURIComponent(q)).then(function (list) {
-            if (!mRow.isConnected) return;
+            if (!isConnectedNode(mRow)) return;
             if (!list || list.length === 0) {
               mRow.appendChild(make("div", "setting-help", "No movies found"));
               return;
@@ -1664,7 +1671,7 @@ window.FMHYApp = (function () {
           addSectionHeader(resultsBox, "Series & Anime");
           var serRow = addHorizontalRow(resultsBox);
           FMHYData.Catalog.list("series", "search=" + encodeURIComponent(q)).then(function (list) {
-            if (!serRow.isConnected) return;
+            if (!isConnectedNode(serRow)) return;
             if (!list || list.length === 0) {
               serRow.appendChild(make("div", "setting-help", "No series found"));
               return;
@@ -1676,7 +1683,7 @@ window.FMHYApp = (function () {
           addSectionHeader(resultsBox, "Live TV Channels");
           var chRow = addHorizontalRow(resultsBox);
           FMHYData.Iptv.search(q).then(function (chs) {
-            if (!chRow.isConnected) return;
+            if (!isConnectedNode(chRow)) return;
             if (!chs || chs.length === 0) {
               chRow.appendChild(make("div", "setting-help", "No channels found"));
               return;
@@ -1893,17 +1900,25 @@ window.FMHYApp = (function () {
   // =========================================================================
 
   function init() {
+    if (state.initialized) return;
+    state.initialized = true;
+
     registerTizenRemoteKeys();
     FMHYPlayer.init();
     FMHYBrowser.init();
     initGlobalKeyListeners();
 
+    // Render UI immediately so the TV screen is never blank while service/network initializes
+    buildTabBar();
+    renderCurrentView(false);
+    var bar = el("tab-bar");
+    var homePill = bar ? bar.querySelector('.tab-pill[data-tab-idx="0"]') : null;
+    if (homePill) setFocus(homePill, false);
+
     FMHYData.init().then(function () {
-      buildTabBar();
-      renderCurrentView(false);
-      var bar = el("tab-bar");
-      var homePill = bar ? bar.querySelector('.tab-pill[data-tab-idx="0"]') : null;
-      if (homePill) setFocus(homePill, false);
+      if (state.currentTab === 0 && state.screenStack.length === 0 && !FMHYBrowser.isOpen() && !FMHYPlayer.isOpen()) {
+        renderCurrentView(true);
+      }
     });
   }
 
@@ -1927,6 +1942,10 @@ window.FMHYApp = (function () {
   };
 })();
 
-window.addEventListener("DOMContentLoaded", function () {
+if (document.readyState === "loading") {
+  window.addEventListener("DOMContentLoaded", function () {
+    window.FMHYApp.init();
+  });
+} else {
   window.FMHYApp.init();
-});
+}
