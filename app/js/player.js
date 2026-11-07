@@ -415,17 +415,21 @@ window.FMHYPlayer = (function () {
     state.open = true;
     state.url = opts.url;
     state.dash = !!opts.dash;
-    state.headers = opts.headers || {};
+    var normHeaders = Object.assign({}, opts.headers || {});
+    if (opts.referer && !normHeaders["Referer"]) normHeaders["Referer"] = opts.referer;
+    if (opts.origin && !normHeaders["Origin"]) normHeaders["Origin"] = opts.origin;
+    if (opts.ua && !normHeaders["User-Agent"]) normHeaders["User-Agent"] = opts.ua;
+    state.headers = normHeaders;
     state.title = opts.title || "Playing";
     state.pageTitle = opts.pageTitle || opts.title || "";
     state.pageUrl = opts.pageUrl || "";
     state.site = opts.site || "";
     state.imdb = opts.imdb || "";
-    state.series = !!opts.series;
+    state.series = !!(opts.series || opts.type === "series" || Number(opts.season || 0) > 0);
     state.season = Number(opts.season || 0);
     state.episode = Number(opts.episode || 0);
     state.isIptv = !!opts.isIptv;
-    state.subUrls = opts.subs || [];
+    state.subUrls = opts.subs || opts.subUrls || [];
     state.loadedSubTracks = [];
     state.activeSubIdx = -1;
     state.zoomIdx = 0;
@@ -435,8 +439,8 @@ window.FMHYPlayer = (function () {
     state.scrobbledStop = false;
     state.onCloseCallback = opts.onClose || null;
     state.onSwitchServerCallback = opts.onSwitchServer || null;
-    state.pageServers = opts.servers || [];
-    state.pageQualities = opts.qualities || [];
+    state.pageServers = opts.servers || opts.pageServers || [];
+    state.pageQualities = opts.qualities || opts.pageQualities || [];
     FMHYData.Subs.delayMs = 0;
 
     var layer = el("player-layer");
@@ -470,9 +474,9 @@ window.FMHYPlayer = (function () {
       loadSubtitleUrl(su, "Subtitles " + (i + 1) + " (" + fn + ")", "CC", false);
     }
 
-    // Use service proxy automatically if custom Referer/Origin/User-Agent headers are present
-    var needsHeaderReplay = !!(state.headers["Referer"] || state.headers["Origin"] || state.headers["User-Agent"]);
-    var useProxyFirst = needsHeaderReplay && FMHYData.isServiceOnline();
+    // Use service proxy automatically if custom Referer/Origin/User-Agent headers are present or opts.useProxy is true
+    var needsHeaderReplay = !!(opts.useProxy || state.headers["Referer"] || state.headers["Origin"] || state.headers["User-Agent"]);
+    var useProxyFirst = !state.isIptv && needsHeaderReplay && FMHYData.isServiceOnline();
     state.triedProxy = useProxyFirst;
     attachStream(state.url, useProxyFirst);
     showControls();

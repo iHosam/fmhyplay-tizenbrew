@@ -6,7 +6,7 @@
 window.FMHYApp = (function () {
   "use strict";
 
-  var APP_VERSION = "1.0.4";
+  var APP_VERSION = "1.0.5";
   var TABS = ["Home", "Movies", "Series", "Live TV", "Browse", "Settings"];
 
   // Surface runtime errors on screen (TV has no devtools) so failures are visible
@@ -699,10 +699,68 @@ window.FMHYApp = (function () {
       siteObj: site || null,
       query: query || "",
       imdb: meta.imdb || "",
+      tmdb: meta.tmdb || "",
       type: meta.type || "movie",
       season: meta.season || 0,
       episode: meta.episode || 0,
-      title: meta.title || query || (site ? site.name : "")
+      title: meta.title || query || (site ? site.name : ""),
+      useProxy: meta.useProxy === true
+    });
+  }
+
+  function playDirectOrEmbed(type, detail, season, episode) {
+    var sNum = type === "series" ? (season || 1) : 0;
+    var eNum = type === "series" ? (episode || 1) : 0;
+    var fullTitle = detail.name + (type === "series" ? (" S" + sNum + "E" + eNum) : "");
+    var epLabel = type === "series" ? ("S" + (sNum < 10 ? "0" + sNum : sNum) + "E" + (eNum < 10 ? "0" + eNum : eNum)) : "";
+
+    toast("Resolving HD stream for " + fullTitle + "…");
+    FMHYData.Sites.resolveDirectStream(type, detail.id, detail.tmdb, sNum, eNum).then(function (resolved) {
+      if (resolved && resolved.ok && resolved.streams && resolved.streams.length > 0) {
+        var best = resolved.streams[0];
+        var streamUrls = resolved.streams.map(function (st) { return st.url; });
+        var subList = (resolved.subtitles || []).map(function (sb) { return sb.url || sb; });
+        FMHYData.History.record(best.url, detail.name, best.label || "Direct HD", epLabel);
+        FMHYPlayer.open({
+          url: best.url,
+          allStreams: streamUrls,
+          subs: subList,
+          title: fullTitle,
+          headers: best.headers || {},
+          referer: best.referer || "",
+          origin: best.origin || "",
+          useProxy: false,
+          imdb: detail.id,
+          type: type,
+          season: sNum,
+          episode: eNum
+        });
+        return;
+      }
+
+      // Fallback: open top verified embed server directly (no sandbox)
+      var embeds = FMHYData.Sites.embedUrlsForTitle(type, detail.id, sNum || 1, eNum || 1, detail.tmdb);
+      if (embeds.length > 0) {
+        toast("Opening " + embeds[0].label + "…");
+        openSite(null, embeds[0].url, detail.name, {
+          imdb: detail.id,
+          tmdb: detail.tmdb || "",
+          type: type,
+          season: sNum,
+          episode: eNum,
+          title: fullTitle
+        });
+      } else {
+        toast("No direct stream found — pick a server");
+        openSitePickerForQuery(detail.name, {
+          imdb: detail.id,
+          tmdb: detail.tmdb || "",
+          type: type,
+          season: sNum,
+          episode: eNum,
+          title: fullTitle
+        });
+      }
     });
   }
 
@@ -797,7 +855,17 @@ window.FMHYApp = (function () {
     card.appendChild(info);
 
     makeFocusable(card, function () {
-      openSite(null, entry.url, "", { title: entry.title });
+      if (entry.url && (/\.m3u8(\?|$)/i.test(entry.url) || entry.url.indexOf("/playlist/") !== -1)) {
+        FMHYPlayer.open({
+          url: entry.url,
+          title: entry.title + (entry.ep ? " " + entry.ep : ""),
+          referer: "https://vixsrc.to/",
+          origin: "https://vixsrc.to",
+          useProxy: false
+        });
+      } else {
+        openSite(null, entry.url, "", { title: entry.title });
+      }
     }, function () {
       showConfirmModal(entry.title, "Remove from Continue Watching?", "Remove", function () {
         FMHYData.History.remove(entry.url);
@@ -1511,17 +1579,25 @@ window.FMHYApp = (function () {
           hero.appendChild(info);
           container.appendChild(hero);
 
-          // Action Row: Play on Multi-Embed, Top Starred Sites, Save, Pick Site
+          // Action Row: Play Now (Direct Native HD), Instant Embed, Top Starred Sites, Save, Pick Site
           addSectionHeader(container, type === "movie" ? "Watch Movie" : "Watch Series");
           var actRow = addHorizontalRow(container);
 
-          // 1. Instant Embed Player (VidSrc / VidLink / SuperEmbed)
-          var embeds = FMHYData.Sites.embedUrlsForTitle(type, detail.id, 1, 1);
+          // 1. Direct Native HD Player (Resolves 1080p/720p HLS directly into FMHYPlayer, falls back to VidLink Pro)
+          var directPlayChip = make("div", "chip active", type === "series" ? "▶  Play S1 E1 (Native HD)" : "▶  Play Movie (Native HD)");
+          makeFocusable(directPlayChip, function () {
+            playDirectOrEmbed(type, detail, 1, 1);
+          });
+          actRow.appendChild(directPlayChip);
+
+          // 2. Instant Embed Player (VidLink Pro / VidFast / 111Movies / AutoEmbed)
+          var embeds = FMHYData.Sites.embedUrlsForTitle(type, detail.id, 1, 1, detail.tmdb);
           if (embeds.length > 0) {
-            var embedChip = make("div", "chip active", "▶  Instant Embed (" + embeds[0].label + ")");
+            var embedChip = make("div", "chip", "🎬  Embed (" + embeds[0].label + ")");
             makeFocusable(embedChip, function () {
               openSite(null, embeds[0].url, detail.name, {
                 imdb: detail.id,
+                tmdb: detail.tmdb || "",
                 type: type,
                 season: type === "series" ? 1 : 0,
                 episode: type === "series" ? 1 : 0,
@@ -1531,16 +1607,17 @@ window.FMHYApp = (function () {
             actRow.appendChild(embedChip);
           }
 
-          // 2. Top 3 Starred Sites (matches TitleActivity.topPlaySites)
+          // 3. Top 3 Starred Sites (matches TitleActivity.topPlaySites)
           var catKey = type === "series" ? "streaming" : "streaming";
           var topSites = FMHYData.Sites.starred().slice(0, 3);
           if (topSites.length === 0) topSites = FMHYData.Sites.byCategory(catKey).slice(0, 3);
-          topSites.forEach(function (s, idx) {
-            var playChip = make("div", "chip" + (idx === 0 && embeds.length === 0 ? " active" : ""), "▶  " + s.name);
+          topSites.forEach(function (s) {
+            var playChip = make("div", "chip", "🌐  " + s.name);
             makeFocusable(playChip, function () {
               var dl = FMHYData.Sites.deeplink(s.url(), detail.name);
               openSite(s, dl, detail.name, {
                 imdb: detail.id,
+                tmdb: detail.tmdb || "",
                 type: type,
                 season: type === "series" ? 1 : 0,
                 episode: type === "series" ? 1 : 0,
@@ -1550,7 +1627,7 @@ window.FMHYApp = (function () {
             actRow.appendChild(playChip);
           });
 
-          // 3. Save / Favorite Chip
+          // 4. Save / Favorite Chip
           var itemSummary = {
             id: detail.id,
             type: type,
@@ -1567,15 +1644,17 @@ window.FMHYApp = (function () {
           });
           actRow.appendChild(saveChip);
 
-          // 4. Pick any site modal
-          var pickChip = make("div", "chip", "Pick site…");
+          // 5. Pick any site / server modal
+          var pickChip = make("div", "chip", "Servers & Sites…");
           makeFocusable(pickChip, function () {
             openSitePickerForQuery(detail.name, {
               imdb: detail.id,
+              tmdb: detail.tmdb || "",
               type: type,
               season: type === "series" ? 1 : 0,
               episode: type === "series" ? 1 : 0,
-              title: detail.name
+              title: detail.name,
+              detailObj: detail
             });
           });
           actRow.appendChild(pickChip);
@@ -1619,19 +1698,16 @@ window.FMHYApp = (function () {
                 var epQuery = detail.name + " S" + (ep.season < 10 ? "0" + ep.season : ep.season) + "E" + (ep.episode < 10 ? "0" + ep.episode : ep.episode);
                 var epMeta = {
                   imdb: detail.id,
+                  tmdb: detail.tmdb || "",
                   type: "series",
                   season: ep.season,
                   episode: ep.episode,
-                  title: detail.name + " S" + ep.season + "E" + ep.episode
+                  title: detail.name + " S" + ep.season + "E" + ep.episode,
+                  detailObj: detail
                 };
 
                 makeFocusable(eRow, function () {
-                  var epEmbeds = FMHYData.Sites.embedUrlsForTitle("series", detail.id, ep.season, ep.episode);
-                  if (epEmbeds.length > 0) {
-                    openSite(null, epEmbeds[0].url, detail.name, epMeta);
-                  } else if (topSites[0]) {
-                    openSite(topSites[0], FMHYData.Sites.deeplink(topSites[0].url(), detail.name), detail.name, epMeta);
-                  }
+                  playDirectOrEmbed("series", detail, ep.season, ep.episode);
                 }, function () {
                   openSitePickerForQuery(epQuery, epMeta);
                 });
@@ -1656,7 +1732,14 @@ window.FMHYApp = (function () {
     meta = meta || {};
     var items = [];
     if (meta.imdb) {
-      var embeds = FMHYData.Sites.embedUrlsForTitle(meta.type || "movie", meta.imdb, meta.season || 1, meta.episode || 1);
+      items.push({
+        label: "▶  Direct HD Stream (Native TV Player)",
+        action: function () {
+          var dObj = meta.detailObj || { id: meta.imdb, tmdb: meta.tmdb || "", name: meta.title || query };
+          playDirectOrEmbed(meta.type || "movie", dObj, meta.season || 1, meta.episode || 1);
+        }
+      });
+      var embeds = FMHYData.Sites.embedUrlsForTitle(meta.type || "movie", meta.imdb, meta.season || 1, meta.episode || 1, meta.tmdb);
       embeds.forEach(function (em) {
         items.push({
           label: "🎬 " + em.label + " (Multi-Server Embed)",

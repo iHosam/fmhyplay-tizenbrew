@@ -205,27 +205,25 @@ window.FMHYData = (function () {
 
   // ---- Built-in Curated FMHY Sites + Live Updates (Sites.java Port) ----
   var BUILTIN_SITES = [
-    // Starred FMHY Picks - Movies & TV
-    { id: "cineby", name: "Cineby", cat: "streaming", urls: ["https://www.cineby.app", "https://www.cineby.ru"], star: true, tags: "Movies · TV · 4K · Fast" },
-    { id: "rivestream", name: "RiveStream", cat: "streaming", urls: ["https://rivestream.org", "https://rivestream.live"], star: true, tags: "Movies · TV · Anime · Multi-Server" },
-    { id: "flixer", name: "Flixer", cat: "streaming", urls: ["https://flixer.su"], star: true, tags: "Movies · TV · Auto-Next" },
-    { id: "brocoflix", name: "BrocoFlix", cat: "streaming", urls: ["https://brocoflix.com"], star: true, tags: "Movies · TV · 1080p" },
-    { id: "hydrahd", name: "HydraHD", cat: "streaming", urls: ["https://hydrahd.me", "https://hydrahd.cc"], star: true, tags: "Movies · TV · 1080p · Fast" },
-    { id: "flickystream", name: "FlickyStream", cat: "streaming", urls: ["https://flickystream.com"], star: true, tags: "Movies · TV · Multi-Audio" },
-    { id: "xprime", name: "XPrime", cat: "streaming", urls: ["https://xprime.tv"], star: true, tags: "Movies · TV · 4K" },
-    { id: "rgshows", name: "RGShows", cat: "streaming", urls: ["https://www.rgshows.me"], star: true, tags: "Movies · TV · Anime" },
-    { id: "vidbox", name: "VidBox", cat: "streaming", urls: ["https://vidbox.to"], star: true, tags: "Movies · TV · Clean UI" },
-    { id: "1shows", name: "1Shows", cat: "streaming", urls: ["https://www.1shows.live"], star: true, tags: "Movies · TV · Fast" },
-    { id: "spenflix", name: "SpenFlix", cat: "streaming", urls: ["https://watch.spencerdevs.xyz"], star: false, tags: "Movies · TV · P-Stream" },
-    { id: "nepu", name: "Nepu", cat: "streaming", urls: ["https://nepu.to"], star: false, tags: "Movies · TV · 1080p" },
-    { id: "fmovies", name: "FMovies+", cat: "streaming", urls: ["https://www.fmovies.gd"], star: false, tags: "Movies · TV" },
-    { id: "cinemaos", name: "CinemaOS", cat: "streaming", urls: ["https://cinemaos.live"], star: false, tags: "Movies · TV" },
-    { id: "veloratv", name: "VeloraTV", cat: "streaming", urls: ["https://veloratv.ru"], star: false, tags: "Movies · TV" },
-    { id: "hexawatch", name: "HexaWatch", cat: "streaming", urls: ["https://hexa.watch"], star: false, tags: "Movies · TV · 4K" },
-    { id: "cinetaro", name: "CineTaro", cat: "streaming", urls: ["https://cinetaro.buzz"], star: false, tags: "Movies · TV · Anime" },
-    { id: "lookmovie2", name: "LookMovie", cat: "streaming", urls: ["https://www.lookmovie2.to"], star: false, tags: "Movies · TV · Dedicated" },
-    { id: "pressplay", name: "PressPlay", cat: "streaming", urls: ["https://www.pressplay.top"], star: false, tags: "Movies · TV" },
-    { id: "sflix", name: "SFlix", cat: "streaming", urls: ["https://sflix2.to"], star: false, tags: "Movies · TV" },
+    // Starred FMHY Picks - Movies & TV (Updated from live fmhy/edit/main/docs/video.md)
+    { id: "rivestream", name: "RiveStream", cat: "streaming", urls: ["https://www.rivestream.app", "https://rivestream.ru", "https://watch.corsflix.net"], star: true, tags: "Movies · TV · Anime · 4K · Multi-Server" },
+    { id: "flixer", name: "Flixer", cat: "streaming", urls: ["https://flixer.gd", "https://flixer.su", "https://hexa.su"], star: true, tags: "Movies · TV · Anime · Auto-Next" },
+    { id: "hexa", name: "Hexa", cat: "streaming", urls: ["https://hexa.su", "https://flixer.gd"], star: true, tags: "Movies · TV · 4K · Fast" },
+    { id: "corsflix", name: "CorsFlix", cat: "streaming", urls: ["https://watch.corsflix.net", "https://corsflix.net"], star: true, tags: "Movies · TV · Anime · 4K" },
+    { id: "cinelite", name: "CineLite", cat: "streaming", urls: ["https://cinelite.xyz"], star: true, tags: "Movies · TV · Anime · 4K" },
+    { id: "sweetfox", name: "SweetFox", cat: "streaming", urls: ["https://sweetfox.app", "https://67movies.st"], star: true, tags: "Movies · TV · Anime · Auto-Next" },
+    { id: "cineby", name: "Cineby", cat: "streaming", urls: ["https://www.cineby.ru", "https://www.rivestream.app"], star: true, tags: "Movies · TV · 4K · Fast" },
+    { id: "hydrahd", name: "HydraHD", cat: "streaming", urls: ["https://hydrahd.gd", "https://hydrahd.com"], star: true, tags: "Movies · TV · 1080p · Fast" },
+    { id: "flickystream", name: "FlickyStream", cat: "streaming", urls: ["https://flickystream.mov", "https://meowtv.ru"], star: true, tags: "Movies · TV · Multi-Audio" },
+    { id: "aether", name: "Aether", cat: "streaming", urls: ["https://aether.st", "https://aether.cx"], star: true, tags: "Movies · TV · Anime · 4K" },
+    { id: "1shows", name: "1Shows", cat: "streaming", urls: ["https://www.1flex.org", "https://www.1tube.org"], star: true, tags: "Movies · TV · Fast" },
+    { id: "nepu", name: "Nepu", cat: "streaming", urls: ["https://nepu.io", "https://nepu.app"], star: true, tags: "Movies · TV · 1080p" },
+    { id: "chillflix", name: "Chillflix", cat: "streaming", urls: ["https://chillflix.lol", "https://vuflix.co"], star: false, tags: "Movies · TV · 4K" },
+    { id: "dulo", name: "Dulo", cat: "streaming", urls: ["https://dulo.mov"], star: false, tags: "Movies · TV · 4K" },
+    { id: "cinecat", name: "Cinecat", cat: "streaming", urls: ["https://cinecat.eu"], star: false, tags: "Movies · TV · P-Stream" },
+    { id: "pressplay", name: "PressPlay", cat: "streaming", urls: ["https://pressplayx.to"], star: false, tags: "Movies · TV" },
+    { id: "primeshows", name: "PrimeShows", cat: "streaming", urls: ["https://www.primeshows.org", "https://netshows.xyz"], star: false, tags: "Movies · TV · Anime" },
+    { id: "moovie", name: "Moovie", cat: "streaming", urls: ["https://moovie.fun"], star: false, tags: "Movies · TV · Anime" },
 
     // Anime
     { id: "miruro", name: "Miruro", cat: "anime", urls: ["https://www.miruro.tv", "https://www.miruro.online"], star: true, tags: "Sub · Dub · Multi-Source" },
@@ -272,21 +270,24 @@ window.FMHYData = (function () {
   ];
 
   var EMBED_SERVERS = [
-    { label: "VidSrc CC", movie: "https://vidsrc.cc/v2/embed/movie/{id}", tv: "https://vidsrc.cc/v2/embed/tv/{id}/{s}/{e}" },
     { label: "VidLink Pro", movie: "https://vidlink.pro/movie/{id}?autoplay=true", tv: "https://vidlink.pro/tv/{id}/{s}/{e}?autoplay=true" },
-    { label: "AutoEmbed", movie: "https://player.autoembed.cc/embed/movie/{id}", tv: "https://player.autoembed.cc/embed/tv/{id}/{s}/{e}" },
-    { label: "VidSrc XYZ", movie: "https://vidsrc.xyz/embed/movie/{id}", tv: "https://vidsrc.xyz/embed/tv/{id}/{s}-{e}" },
+    { label: "VidFast", movie: "https://vidfast.vc/movie/{id}?autoPlay=true", tv: "https://vidfast.vc/tv/{id}/{s}/{e}?autoPlay=true" },
+    { label: "111Movies", movie: "https://111movies.com/movie/{id}", tv: "https://111movies.com/tv/{id}/{s}/{e}" },
+    { label: "AutoEmbed", movie: "https://autoembed.me/movie/imdb/{id}", tv: "https://autoembed.me/tv/imdb/{id}-{s}-{e}" },
     { label: "MultiEmbed", movie: "https://multiembed.mov/?video_id={id}", tv: "https://multiembed.mov/?video_id={id}&s={s}&e={e}" },
     { label: "2Embed", movie: "https://www.2embed.cc/embed/{id}", tv: "https://www.2embed.cc/embedtv/{id}&s={s}&e={e}" }
   ];
 
   // Default search URL patterns per domain
   var SEARCH_PATTERNS = {
-    "cineby.app": "/search?q={q}",
-    "cineby.ru": "/search?q={q}",
-    "rivestream.org": "/search?q={q}",
+    "rivestream.app": "/search?q={q}",
+    "rivestream.ru": "/search?q={q}",
+    "watch.corsflix.net": "/search?q={q}",
+    "flixer.gd": "/search?q={q}",
     "flixer.su": "/search?q={q}",
-    "hydrahd.me": "/index.php?menu=search&query={q}",
+    "hexa.su": "/search?q={q}",
+    "cineby.ru": "/search?q={q}",
+    "hydrahd.gd": "/index.php?menu=search&query={q}",
     "miruro.tv": "/search?query={q}",
     "hianime.to": "/search?keyword={q}",
     "animekai.to": "/browser?keyword={q}",
@@ -343,7 +344,7 @@ window.FMHYData = (function () {
   function getStarredIds() {
     var ids = Store.get("starred_site_ids", null);
     if (!Array.isArray(ids)) {
-      ids = ["cineby", "rivestream", "miruro", "hianime", "thetvapp", "streamed"];
+      ids = ["rivestream", "flixer", "hexa", "miruro", "hianime", "thetvapp"];
       Store.set("starred_site_ids", ids);
     }
     return ids;
@@ -418,8 +419,77 @@ window.FMHYData = (function () {
           .replace(/\{id\}/g, encodeURIComponent(id))
           .replace(/\{s\}/g, String(s))
           .replace(/\{e\}/g, String(e));
-        return { label: srv.label, name: srv.label, url: u };
+        return { label: srv.label, name: srv.label, url: u, useProxy: false };
       });
+    },
+    resolveDirectStream: function (type, imdbId, tmdbId, season, episode) {
+      var isSeries = type === "series" || type === "tv";
+      var s = season || 1;
+      var e = episode || 1;
+      var q = SERVICE_URL + "/api/resolve?type=" + (isSeries ? "series" : "movie") +
+              "&imdb=" + encodeURIComponent(imdbId || "") +
+              "&tmdb=" + encodeURIComponent(tmdbId || "") +
+              "&s=" + s + "&e=" + e;
+
+      function normalizeResolved(d) {
+        if (!d || !d.ok || !d.url) return { ok: false };
+        var streamObj = {
+          url: d.url,
+          referer: d.referer || "https://vixsrc.to/",
+          origin: d.origin || "https://vixsrc.to",
+          headers: d.headers || { Referer: d.referer || "https://vixsrc.to/", Origin: d.origin || "https://vixsrc.to" },
+          label: d.label || "Direct HD (Multi-Audio)"
+        };
+        d.streams = d.streams && d.streams.length > 0 ? d.streams : [streamObj];
+        d.subtitles = d.subtitles || [];
+        return d;
+      }
+
+      function clientFallback() {
+        var tmdbPromise = tmdbId
+          ? Promise.resolve(String(tmdbId))
+          : Catalog.get(isSeries ? "series" : "movie", imdbId).then(function (det) { return det && det.tmdb ? det.tmdb : ""; });
+
+        return tmdbPromise.then(function (resolvedTmdb) {
+          if (!resolvedTmdb) return { ok: false, error: "Missing TMDB ID" };
+          var apiPath = isSeries
+            ? ("https://vixsrc.to/api/tv/" + encodeURIComponent(resolvedTmdb) + "/" + s + "/" + e)
+            : ("https://vixsrc.to/api/movie/" + encodeURIComponent(resolvedTmdb));
+          var pageRef = isSeries
+            ? ("https://vixsrc.to/tv/" + resolvedTmdb + "/" + s + "/" + e)
+            : ("https://vixsrc.to/movie/" + resolvedTmdb);
+          return fetchText(apiPath, { ref: pageRef }).then(function (txt) {
+            var j = JSON.parse(txt);
+            if (!j || !j.src) return { ok: false, error: "No direct stream" };
+            var embedUrl = j.src.indexOf("http") === 0 ? j.src : ("https://vixsrc.to" + j.src);
+            return fetchText(embedUrl, { ref: pageRef }).then(function (html) {
+              var tokMatch = html.match(/['"]token['"]\s*:\s*['"]([^'"]+)['"]/);
+              var expMatch = html.match(/['"]expires['"]\s*:\s*['"]([^'"]+)['"]/);
+              var urlMatch = html.match(/url\s*:\s*['"](https?:\/\/[^'"]+\/playlist\/[^'"]+)['"]/);
+              if (!tokMatch || !expMatch || !urlMatch) return { ok: false, error: "No playlist token" };
+              var m3u8Url = urlMatch[1] + "?token=" + encodeURIComponent(tokMatch[1]) + "&expires=" + encodeURIComponent(expMatch[1]) + "&h=1&lang=en";
+              return normalizeResolved({
+                ok: true,
+                tmdbId: String(resolvedTmdb),
+                url: m3u8Url,
+                referer: "https://vixsrc.to/",
+                origin: "https://vixsrc.to",
+                label: "Direct HD (Multi-Audio)"
+              });
+            });
+          });
+        }).catch(function () { return { ok: false }; });
+      }
+
+      return fetch(q)
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d && d.ok && d.url) return normalizeResolved(d);
+          return clientFallback();
+        })
+        .catch(function () {
+          return clientFallback();
+        });
     },
     refresh: function () {
       var ENTRY_RE = /^\*\s*(⭐|🌟|🌐)?\s*(?:\*\*)?\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)(?:\*\*)?(.*)$/;

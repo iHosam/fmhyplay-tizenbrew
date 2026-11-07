@@ -94,7 +94,7 @@ window.FMHYBrowser = (function () {
 
   function loadUrlIntoFrame(rawUrl, useProxy) {
     state.rawUrl = rawUrl;
-    state.useProxy = useProxy !== false;
+    state.useProxy = !!useProxy;
     var badge = el("browser-url-badge");
     if (badge) badge.textContent = rawUrl;
 
@@ -116,15 +116,17 @@ window.FMHYBrowser = (function () {
   function open(opts) {
     opts = opts || {};
     state.open = true;
-    state.rawUrl = opts.url || "https://fmhy.net";
+    state.rawUrl = opts.url || "https://www.rivestream.app";
     state.siteName = opts.siteName || FMHYData.History.hostLabel(state.rawUrl);
     state.query = opts.query || "";
     state.imdb = opts.imdb || "";
+    state.tmdb = opts.tmdb || "";
     state.type = opts.type || "movie";
     state.season = opts.season || 0;
     state.episode = opts.episode || 0;
     state.title = opts.title || state.query || state.siteName;
-    state.useProxy = opts.useProxy !== false;
+    // Default to Direct Frame (useProxy: false) so embed players & SPA sites run on their real origin without sandbox/routing errors
+    state.useProxy = opts.useProxy === true;
     state.pointerX = Math.round(window.innerWidth / 2);
     state.pointerY = Math.round(window.innerHeight / 2);
 
@@ -136,7 +138,7 @@ window.FMHYBrowser = (function () {
         state.embedOptions.push({
           label: "🎬 " + em.label + " (Embed)",
           url: em.url,
-          useProxy: true
+          useProxy: false
         });
       });
     }
@@ -145,7 +147,7 @@ window.FMHYBrowser = (function () {
         state.embedOptions.push({
           label: "🌐 Mirror " + (idx + 1) + ": " + mirrorUrl.replace(/^https?:\/\//, ""),
           url: state.query ? FMHYData.Sites.deeplink(mirrorUrl, state.query) : mirrorUrl,
-          useProxy: true
+          useProxy: false
         });
       });
     }
@@ -173,7 +175,27 @@ window.FMHYBrowser = (function () {
     loadUrlIntoFrame(state.rawUrl, state.useProxy);
     startSnifferPolling();
 
-    window.FMHYApp.toast("Sniffing video streams… Use D-pad pointer or Top Bar");
+    // Also resolve direct HLS stream in background if an IMDb/TMDB ID is known
+    if (state.imdb || state.tmdb) {
+      FMHYData.Sites.resolveDirectStream(state.type, state.imdb, state.tmdb, state.season || 1, state.episode || 1)
+        .then(function (res) {
+          if (!state.open || !res || !res.url) return;
+          var exists = state.streams.some(function (x) { return x.url === res.url; });
+          if (!exists) {
+            state.streams.unshift({
+              url: res.url,
+              referer: res.referer || "https://vixsrc.to/",
+              origin: res.origin || "https://vixsrc.to",
+              ua: navigator.userAgent,
+              time: Date.now()
+            });
+            updatePlayButtonUi();
+          }
+        })
+        .catch(function () {});
+    }
+
+    window.FMHYApp.toast("Use D-pad pointer to click Play, or press Yellow for Servers");
   }
 
   function close() {
@@ -218,17 +240,19 @@ window.FMHYBrowser = (function () {
     if (low.indexOf("doubleclick") !== -1 || low.indexOf("googlesyndication") !== -1) return false;
     return /\.(m3u8|mpd|mp4|webm|mkv)(\?|$)/i.test(low) ||
            /(master|index|playlist|manifest|hls|dash)\.(m3u8|mpd|txt)/i.test(low) ||
-           /\/(hls|m3u8|manifest)\//i.test(low);
+           /\/(hls|m3u8|manifest|playlist)\//i.test(low);
   }
 
   function ingestSnifferSnapshot(data) {
     var addedNewStream = false;
 
-    if (Array.isArray(data.subs)) {
-      data.subs.forEach(function (s) {
-        if (!s || !s.url) return;
-        var exists = state.subs.some(function (x) { return x.url === s.url; });
-        if (!exists) state.subs.push({ url: s.url, lang: s.lang || "Sub" });
+    var rawSubs = data.subs || data.subtitles || [];
+    if (Array.isArray(rawSubs)) {
+      rawSubs.forEach(function (s) {
+        var subObj = typeof s === "string" ? { url: s, lang: "Sub" } : s;
+        if (!subObj || !subObj.url) return;
+        var exists = state.subs.some(function (x) { return x.url === subObj.url; });
+        if (!exists) state.subs.push({ url: subObj.url, lang: subObj.lang || "Sub" });
       });
     }
 
@@ -239,15 +263,19 @@ window.FMHYBrowser = (function () {
       state.qualities = data.qualities;
     }
 
-    if (Array.isArray(data.streams)) {
-      data.streams.forEach(function (st) {
+    var rawStreams = data.streams || data.manifests || [];
+    if (Array.isArray(rawStreams)) {
+      rawStreams.forEach(function (st) {
         if (!st || !st.url || !isRealStreamUrl(st.url)) return;
         var exists = state.streams.some(function (x) { return x.url === st.url; });
         if (!exists) {
+          var ref = st.referer || (st.headers && (st.headers.Referer || st.headers.referer)) || state.rawUrl;
+          var orig = st.origin || (st.headers && (st.headers.Origin || st.headers.origin)) || "";
           state.streams.unshift({
             url: st.url,
-            referer: st.referer || state.rawUrl,
-            origin: st.origin || "",
+            dash: !!st.dash,
+            referer: ref,
+            origin: orig,
             ua: st.ua || navigator.userAgent,
             time: st.time || Date.now()
           });
@@ -258,8 +286,8 @@ window.FMHYBrowser = (function () {
 
     updatePlayButtonUi();
 
-    // Auto-handoff to native player if 'native' setting is enabled (matches Sniffer.java)
-    if (addedNewStream && state.streams.length > 0 && FMHYData.Store.getBool("native", true)) {
+    // Auto-handoff to native player if 'native' setting is enabled and Proxy mode sniffed a stream
+    if (addedNewStream && state.useProxy && state.streams.length > 0 && FMHYData.Store.getBool("native", true)) {
       var best = pickBestStream(state.streams);
       if (best && state.autoLaunchedStream !== best.url && !window.FMHYPlayer.isOpen()) {
         state.autoLaunchedStream = best.url;
@@ -270,9 +298,8 @@ window.FMHYBrowser = (function () {
 
   function pickBestStream(streams) {
     if (!streams || streams.length === 0) return null;
-    // Prefer master/index .m3u8 or .mpd over single segments
     for (var i = 0; i < streams.length; i++) {
-      if (/\.(m3u8|mpd)(\?|$)/i.test(streams[i].url)) return streams[i];
+      if (/\.(m3u8|mpd)(\?|$)/i.test(streams[i].url) || /\/playlist\//i.test(streams[i].url)) return streams[i];
     }
     return streams[0];
   }
@@ -280,9 +307,27 @@ window.FMHYBrowser = (function () {
   function launchNativePlayer(streamObj) {
     var st = streamObj || pickBestStream(state.streams);
     if (!st) {
-      if (state.streams.length === 0) {
-        window.FMHYApp.toast("No video stream detected yet — click play inside the page or switch server");
+      if (state.imdb || state.tmdb) {
+        window.FMHYApp.toast("Resolving direct HD stream for Native Player…");
+        FMHYData.Sites.resolveDirectStream(state.type, state.imdb, state.tmdb, state.season || 1, state.episode || 1)
+          .then(function (res) {
+            if (res && res.url) {
+              launchNativePlayer({
+                url: res.url,
+                referer: res.referer || "https://vixsrc.to/",
+                origin: res.origin || "https://vixsrc.to",
+                ua: navigator.userAgent
+              });
+            } else {
+              window.FMHYApp.toast("No direct stream found — use the embedded player or switch server");
+            }
+          })
+          .catch(function () {
+            window.FMHYApp.toast("No direct stream found — use the embedded player or switch server");
+          });
+        return;
       }
+      window.FMHYApp.toast("No video stream detected yet — click play inside the page or switch server");
       return;
     }
 
@@ -291,6 +336,12 @@ window.FMHYBrowser = (function () {
 
     window.FMHYPlayer.open({
       url: st.url,
+      dash: !!st.dash,
+      headers: {
+        "Referer": st.referer || state.rawUrl,
+        "Origin": st.origin || "",
+        "User-Agent": st.ua || navigator.userAgent
+      },
       referer: st.referer || state.rawUrl,
       origin: st.origin || "",
       ua: st.ua || navigator.userAgent,
@@ -303,13 +354,14 @@ window.FMHYBrowser = (function () {
       episode: state.episode,
       isIptv: false,
       useProxy: true,
+      subs: subUrls,
       subUrls: subUrls,
       subLangs: subLangs,
-      pageServers: state.servers,
-      pageQualities: state.qualities,
+      servers: state.servers,
+      qualities: state.qualities,
       onSwitchServer: function (item) {
-        if (item && item.id) {
-          sendClickToPage(item.id);
+        if (item && (item.id || item.k)) {
+          sendClickToPage(item.id || item.k);
           clearSnifferData();
           window.FMHYApp.toast("Switching to " + item.label + "…");
         }

@@ -350,6 +350,21 @@ function buildInjectedPageScript(pageUrl, autoSearchQuery) {
         "  };",
         "  // Block popup windows",
         "  window.open = function(u) { return null; };",
+        "  // Restore original pathname in URL bar so SPA routers (Next.js/React/Vite) do not see /proxy/page",
+        "  try {",
+        "    var uInit = new URL(PAGE_URL);",
+        "    if (window.history && window.history.replaceState) {",
+        "      window.history.replaceState(null, '', uInit.pathname + uInit.search + uInit.hash);",
+        "    }",
+        "  } catch(e) {}",
+        "  // Prevent anti-sandbox checks inside proxied frames",
+        "  try {",
+        "    var origHasAttr = Element.prototype.hasAttribute;",
+        "    Element.prototype.hasAttribute = function(name) {",
+        "      if (String(name).toLowerCase() === 'sandbox') return false;",
+        "      return origHasAttr.call(this, name);",
+        "    };",
+        "  } catch(e) {}",
         "  // Watch URLs for .m3u8 / .mpd / .vtt / .srt",
         "  function checkUrl(u) {",
         "    if (!u || typeof u !== 'string') return;",
@@ -562,9 +577,25 @@ var server = http.createServer(function (req, res) {
     if (pathname === '/api/sniffer/poll') {
         var clickKey = snifferState.pendingClickKey;
         snifferState.pendingClickKey = null;
+        var mappedStreams = snifferState.manifests.map(function (m) {
+            return {
+                url: m.url,
+                dash: !!m.dash,
+                master: !!m.master,
+                referer: (m.headers && (m.headers.Referer || m.headers.referer)) || snifferState.pageUrl || '',
+                origin: (m.headers && (m.headers.Origin || m.headers.origin)) || '',
+                headers: m.headers || {},
+                time: m.time
+            };
+        });
+        var mappedSubs = snifferState.subtitles.map(function (u) {
+            return typeof u === 'string' ? { url: u, lang: 'Sub' } : u;
+        });
         return sendJson(res, 200, {
             manifests: snifferState.manifests,
+            streams: mappedStreams,
             subtitles: snifferState.subtitles,
+            subs: mappedSubs,
             servers: snifferState.servers,
             qualities: snifferState.qualities,
             poster: snifferState.poster,
@@ -573,6 +604,92 @@ var server = http.createServer(function (req, res) {
             pendingClickKey: clickKey,
             updatedAt: snifferState.updatedAt
         });
+    }
+
+    // 3b. Direct Stream Resolver (/api/resolve) - extracts direct HLS .m3u8 for Movies & Series
+    if (pathname === '/api/resolve') {
+        var rType = (query.type === 'series' || query.type === 'tv') ? 'series' : 'movie';
+        var rImdb = query.imdb || '';
+        var rTmdb = query.tmdb || '';
+        var rSeason = parseInt(query.s || query.season || '1', 10) || 1;
+        var rEpisode = parseInt(query.e || query.episode || '1', 10) || 1;
+
+        function resolveWithTmdb(tmdbId) {
+            if (!tmdbId) {
+                return sendJson(res, 404, { ok: false, error: 'Missing TMDB ID' });
+            }
+            var apiPath = rType === 'series'
+                ? ('https://vixsrc.to/api/tv/' + encodeURIComponent(tmdbId) + '/' + rSeason + '/' + rEpisode)
+                : ('https://vixsrc.to/api/movie/' + encodeURIComponent(tmdbId));
+            var pageRef = rType === 'series'
+                ? ('https://vixsrc.to/tv/' + tmdbId + '/' + rSeason + '/' + rEpisode)
+                : ('https://vixsrc.to/movie/' + tmdbId);
+
+            fetchBuffer(apiPath, {
+                headers: { 'User-Agent': CHROME_UA, 'Referer': pageRef, 'Accept': 'application/json' },
+                timeout: 10000
+            }, function (err1, res1, buf1) {
+                if (err1 || !buf1) return sendJson(res, 502, { ok: false, error: 'Resolver API unreachable' });
+                var j1;
+                try { j1 = JSON.parse(buf1.toString('utf8')); } catch (e) {}
+                if (!j1 || !j1.src) return sendJson(res, 404, { ok: false, error: 'Stream not found on direct server' });
+
+                var embedUrl = urlModule.resolve('https://vixsrc.to', j1.src);
+                fetchBuffer(embedUrl, {
+                    headers: { 'User-Agent': CHROME_UA, 'Referer': pageRef },
+                    timeout: 10000
+                }, function (err2, res2, buf2) {
+                    if (err2 || !buf2) return sendJson(res, 502, { ok: false, error: 'Embed page unreachable' });
+                    var html = buf2.toString('utf8');
+                    var tokMatch = html.match(/['"]token['"]\s*:\s*['"]([^'"]+)['"]/);
+                    var expMatch = html.match(/['"]expires['"]\s*:\s*['"]([^'"]+)['"]/);
+                    var urlMatch = html.match(/url\s*:\s*['"](https?:\/\/[^'"]+\/playlist\/[^'"]+)['"]/);
+                    if (!tokMatch || !expMatch || !urlMatch) {
+                        return sendJson(res, 404, { ok: false, error: 'Playlist token not found' });
+                    }
+                    var m3u8Url = urlMatch[1] + '?token=' + encodeURIComponent(tokMatch[1]) + '&expires=' + encodeURIComponent(expMatch[1]) + '&h=1&lang=en';
+                    var streamHeaders = { Referer: 'https://vixsrc.to/', Origin: 'https://vixsrc.to' };
+                    recordManifest(m3u8Url, false, streamHeaders);
+                    return sendJson(res, 200, {
+                        ok: true,
+                        tmdbId: String(tmdbId),
+                        url: m3u8Url,
+                        referer: 'https://vixsrc.to/',
+                        origin: 'https://vixsrc.to',
+                        headers: streamHeaders,
+                        label: 'Direct HD (Multi-Audio)',
+                        streams: [{
+                            url: m3u8Url,
+                            referer: 'https://vixsrc.to/',
+                            origin: 'https://vixsrc.to',
+                            headers: streamHeaders,
+                            label: 'Direct HD (Multi-Audio)'
+                        }],
+                        subtitles: []
+                    });
+                });
+            });
+        }
+
+        if (rTmdb) {
+            return resolveWithTmdb(rTmdb);
+        }
+        if (rImdb && rImdb.indexOf('tt') === 0) {
+            var metaUrl = 'https://v3-cinemeta.strem.io/meta/' + rType + '/' + encodeURIComponent(rImdb) + '.json';
+            return fetchBuffer(metaUrl, { timeout: 8000 }, function (mErr, mRes, mBuf) {
+                var foundTmdb = '';
+                if (!mErr && mBuf) {
+                    try {
+                        var mObj = JSON.parse(mBuf.toString('utf8'));
+                        if (mObj && mObj.meta && mObj.meta.moviedb_id) {
+                            foundTmdb = String(mObj.meta.moviedb_id);
+                        }
+                    } catch (e) {}
+                }
+                return resolveWithTmdb(foundTmdb);
+            });
+        }
+        return sendJson(res, 400, { ok: false, error: 'Missing imdb or tmdb parameter' });
     }
 
     if (pathname === '/api/sniffer/clear' && req.method === 'POST') {
@@ -719,7 +836,7 @@ var server = http.createServer(function (req, res) {
         if (req.headers['range']) sHeaders['Range'] = req.headers['range'];
 
         var cleanStreamPath = streamUrl.split('?')[0].split('#')[0].toLowerCase();
-        var looksLikeM3u8 = cleanStreamPath.slice(-5) === '.m3u8' || cleanStreamPath.slice(-4) === '.m3u';
+        var looksLikeM3u8 = cleanStreamPath.slice(-5) === '.m3u8' || cleanStreamPath.slice(-4) === '.m3u' || cleanStreamPath.indexOf('/playlist/') !== -1;
         var looksLikeSrt = forceVtt || cleanStreamPath.slice(-4) === '.srt' || cleanStreamPath.slice(-4) === '.vtt';
 
         if (looksLikeM3u8 || looksLikeSrt) {
@@ -827,11 +944,12 @@ var server = http.createServer(function (req, res) {
                 recordManifest(effectiveUrl, true, { Referer: pageUrl });
             }
 
-            if (ct.indexOf('text/html') >= 0 || rawText.trim().slice(0, 15).toLowerCase().indexOf('<!doctype') === 0 || rawText.trim().slice(0, 6).toLowerCase().indexOf('<html') === 0) {
+            if (ct.indexOf(' text/html') >= 0 || ct.indexOf('text/html') >= 0 || rawText.trim().slice(0, 15).toLowerCase().indexOf('<!doctype') === 0 || rawText.trim().slice(0, 6).toLowerCase().indexOf('<html') === 0) {
                 snifferState.pageUrl = effectiveUrl;
                 var baseTag = '<base href="' + effectiveUrl.replace(/"/g, '&quot;') + '">';
                 var injectScript = buildInjectedPageScript(effectiveUrl, query.q || '');
-                var modifiedHtml = rawText;
+                // Strip sandbox attributes from any child iframes in the page so embed players never show "sandbox not allowed"
+                var modifiedHtml = rawText.replace(/\bsandbox\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
                 if (/<head[^>]*>/i.test(modifiedHtml)) {
                     modifiedHtml = modifiedHtml.replace(/<head[^>]*>/i, function (m) {
                         return m + '\n' + baseTag + '\n' + injectScript;

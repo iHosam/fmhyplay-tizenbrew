@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=1920, height=1080, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>FMHYPlay — Samsung Tizen TV (TizenBrew)</title>
-  <link rel="stylesheet" href="css/style.css?v=4" />
+  <link rel="stylesheet" href="css/style.css?v=5" />
   <!-- HLS.js & dash.js for adaptive streaming in Tizen WebEngine -->
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dashjs@4.7.4/dist/dash.all.min.js"></script>
@@ -34,8 +34,9 @@
     <div id="browser-frame-wrap">
       <iframe
         id="browser-iframe"
-        sandbox="allow-scripts allow-same-origin allow-forms"
-        allow="autoplay; encrypted-media; fullscreen"
+        allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+        allowfullscreen
+        referrerpolicy="origin"
         src="about:blank"
       ></iframe>
     </div>
@@ -100,9 +101,9 @@
   <div id="toast-box"></div>
 
   <!-- FMHYPlay Application Scripts -->
-  <script src="js/data.js?v=4"></script>
-  <script src="js/player.js?v=4"></script>
-  <script src="js/browser.js?v=4"></script>
-  <script src="js/app.js?v=4"></script>
+  <script src="js/data.js?v=5"></script>
+  <script src="js/player.js?v=5"></script>
+  <script src="js/browser.js?v=5"></script>
+  <script src="js/app.js?v=5"></script>
 </body>
 </html>
