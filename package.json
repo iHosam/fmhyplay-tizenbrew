@@ -1,6 +1,6 @@
 {
   "name": "fmhyplay-tizen",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "FMHYPlay for Samsung Tizen TV (TizenBrew) - Stream movies, series, anime, sports & 11,000+ IPTV channels in a native TV player",
   "main": "app/index.html",
   "packageType": "app",

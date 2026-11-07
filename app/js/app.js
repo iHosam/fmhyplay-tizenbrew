@@ -6,7 +6,20 @@
 window.FMHYApp = (function () {
   "use strict";
 
+  var APP_VERSION = "1.0.4";
   var TABS = ["Home", "Movies", "Series", "Live TV", "Browse", "Settings"];
+
+  // Surface runtime errors on screen (TV has no devtools) so failures are visible
+  window.addEventListener("error", function (ev) {
+    try {
+      var box = document.getElementById("toast-box");
+      if (box) {
+        box.textContent = "Error: " + (ev && ev.message ? ev.message : "unknown") +
+          (ev && ev.filename ? " (" + String(ev.filename).split("/").pop() + ":" + ev.lineno + ")" : "");
+        box.style.display = "block";
+      }
+    } catch (e) {}
+  });
 
   var state = {
     currentTab: 0,
@@ -531,7 +544,7 @@ window.FMHYApp = (function () {
     var bar = el("tab-bar");
     clearNode(bar);
 
-    var brand = make("div", "brand-title", "FMHYPlay");
+    var brand = make("div", "brand-title", "FMHYPlay v" + APP_VERSION);
     bar.appendChild(brand);
 
     TABS.forEach(function (name, idx) {
