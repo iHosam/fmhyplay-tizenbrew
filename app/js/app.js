@@ -94,12 +94,15 @@ window.FMHYApp = (function () {
   function isVisible(node) {
     if (!node || !isConnectedNode(node)) return false;
     if (node.style && node.style.display === "none") return false;
-    var r = node.getBoundingClientRect();
-    return r.width > 0 && r.height > 0;
+    return true;
   }
 
   function setFocus(node, scrollIntoView) {
     if (!node || !isVisible(node)) return false;
+
+    if (document.activeElement && document.activeElement.tagName === "INPUT" && document.activeElement !== node) {
+      try { document.activeElement.blur(); } catch (e) {}
+    }
 
     if (state.modalOpen) {
       if (state.modalFocusEl && state.modalFocusEl !== node) {
@@ -107,9 +110,8 @@ window.FMHYApp = (function () {
       }
       state.modalFocusEl = node;
       node.classList.add("focused");
-      try { node.focus({ preventScroll: true }); } catch (e) {}
       if (scrollIntoView !== false) {
-        try { node.scrollIntoView({ block: "nearest", inline: "nearest" }); } catch (e) {}
+        try { node.scrollIntoView(false); } catch (e) {}
       }
       return true;
     }
@@ -120,12 +122,18 @@ window.FMHYApp = (function () {
     state.focusedEl = node;
     node.classList.add("focused");
 
+    // Remember column index inside horizontal rows (.h-row) for natural Up/Down navigation
+    var hRow = node.closest ? node.closest(".h-row") : null;
+    if (hRow) {
+      var hItems = Array.prototype.slice.call(hRow.querySelectorAll(".focusable"));
+      var hIdx = hItems.indexOf(node);
+      if (hIdx !== -1) hRow._lastCol = hIdx;
+    }
+
     var pageScroll = el("page-scroll");
     if (pageScroll && pageScroll.contains(node)) {
       state.lastPageFocusEl = node;
     }
-
-    try { node.focus({ preventScroll: true }); } catch (e) {}
 
     if (scrollIntoView !== false) {
       scrollNodeIntoComfortableView(node);
@@ -134,132 +142,189 @@ window.FMHYApp = (function () {
   }
 
   function scrollNodeIntoComfortableView(node) {
-    // Horizontal row scroll if inside .h-row
-    var hRow = node.closest ? node.closest(".h-row") : null;
-    if (hRow) {
-      var nr = node.getBoundingClientRect();
-      var rr = hRow.getBoundingClientRect();
-      if (nr.left < rr.left + 36) {
-        hRow.scrollLeft -= (rr.left + 36 - nr.left);
-      } else if (nr.right > rr.right - 36) {
-        hRow.scrollLeft += (nr.right - (rr.right - 36));
+    try {
+      // Horizontal row scroll if inside .h-row
+      var hRow = node.closest ? node.closest(".h-row") : null;
+      if (hRow) {
+        var nr = node.getBoundingClientRect();
+        var rr = hRow.getBoundingClientRect();
+        if (rr.width > 0 && nr.width > 0) {
+          if (nr.left < rr.left + 40) {
+            hRow.scrollLeft -= (rr.left + 40 - nr.left);
+          } else if (nr.right > rr.right - 40) {
+            hRow.scrollLeft += (nr.right - (rr.right - 40));
+          }
+        }
       }
-    }
 
-    // Vertical page scroll if inside #page-scroll
-    var page = el("page-scroll");
-    if (page && page.contains(node)) {
-      var rect = node.getBoundingClientRect();
-      var pRect = page.getBoundingClientRect();
-      if (rect.top < pRect.top + 60) {
-        page.scrollTop -= (pRect.top + 60 - rect.top);
-      } else if (rect.bottom > pRect.bottom - 60) {
-        page.scrollTop += (rect.bottom - (pRect.bottom - 60));
+      // Vertical page scroll if inside #page-scroll
+      var page = el("page-scroll");
+      if (page && page.contains(node)) {
+        var rect = node.getBoundingClientRect();
+        var pRect = page.getBoundingClientRect();
+        if (pRect.height > 0 && rect.height > 0) {
+          if (rect.top < pRect.top + 80) {
+            page.scrollTop -= (pRect.top + 80 - rect.top);
+          } else if (rect.bottom > pRect.bottom - 80) {
+            page.scrollTop += (rect.bottom - (pRect.bottom - 80));
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  function chunkArray(arr, size) {
+    var out = [];
+    for (var i = 0; i < arr.length; i += size) {
+      out.push(arr.slice(i, i + size));
+    }
+    return out;
+  }
+
+  function collectRowsFromContainer(container, rows) {
+    if (!container || !container.children) return;
+    var children = container.children;
+    for (var i = 0; i < children.length; i++) {
+      var child = children[i];
+      if (!child || (child.style && child.style.display === "none")) continue;
+      var cls = child.className || "";
+
+      if (cls.indexOf("h-row") !== -1 ||
+          cls.indexOf("search-bar-wrap") !== -1 ||
+          cls.indexOf("modal-actions") !== -1 ||
+          cls.indexOf("sub-stepper-row") !== -1) {
+        var rowItems = Array.prototype.slice.call(child.querySelectorAll(".focusable")).filter(isVisible);
+        if (rowItems.length > 0) {
+          rowItems._container = child;
+          rowItems._isHRow = cls.indexOf("h-row") !== -1;
+          rows.push(rowItems);
+        }
+      } else if (cls.indexOf("poster-grid") !== -1 || cls.indexOf("iptv-grid") !== -1) {
+        var gridItems = Array.prototype.slice.call(child.querySelectorAll(".focusable")).filter(isVisible);
+        var chunks6 = chunkArray(gridItems, 6);
+        for (var c6 = 0; c6 < chunks6.length; c6++) rows.push(chunks6[c6]);
+      } else if (cls.indexOf("site-grid") !== -1) {
+        var siteItems = Array.prototype.slice.call(child.querySelectorAll(".focusable")).filter(isVisible);
+        var chunks4 = chunkArray(siteItems, 4);
+        for (var c4 = 0; c4 < chunks4.length; c4++) rows.push(chunks4[c4]);
+      } else if (child.classList && child.classList.contains("focusable")) {
+        if (isVisible(child)) rows.push([child]);
+      } else if (child.children && child.children.length > 0) {
+        collectRowsFromContainer(child, rows);
       }
     }
   }
 
-  function activeFocusableCandidates() {
+  function getNavigationRows() {
+    var rows = [];
     if (state.modalOpen) {
       var modal = el("modal-backdrop");
-      return modal ? Array.prototype.slice.call(modal.querySelectorAll(".focusable")).filter(isVisible) : [];
+      if (modal) collectRowsFromContainer(modal, rows);
+      return rows;
     }
-    var root = el("app-root");
-    return root ? Array.prototype.slice.call(root.querySelectorAll(".focusable")).filter(isVisible) : [];
+
+    var tabBar = el("tab-bar");
+    if (tabBar) {
+      var tabs = Array.prototype.slice.call(tabBar.querySelectorAll(".focusable")).filter(isVisible);
+      if (tabs.length > 0) {
+        tabs._isTabBar = true;
+        rows.push(tabs);
+      }
+    }
+
+    var pageContent = el("page-content");
+    if (pageContent) {
+      collectRowsFromContainer(pageContent, rows);
+    }
+    return rows;
   }
 
   function moveFocusSpatial(dir) {
+    var rows = getNavigationRows();
+    if (rows.length === 0) return false;
+
     var current = state.modalOpen ? state.modalFocusEl : state.focusedEl;
-    var candidates = activeFocusableCandidates();
-    if (candidates.length === 0) return false;
-    if (!current || !isVisible(current)) {
-      return setFocus(candidates[0], true);
-    }
+    var rIdx = -1;
+    var cIdx = -1;
 
-    // Special handling when focused on the top Tab Bar
-    var tabBar = el("tab-bar");
-    if (!state.modalOpen && tabBar && tabBar.contains(current)) {
-      var tabItems = Array.prototype.slice.call(tabBar.querySelectorAll(".focusable")).filter(isVisible);
-      var idx = tabItems.indexOf(current);
-      if (dir === "left") {
-        if (idx > 0) {
-          var prevTab = tabItems[idx - 1];
-          setFocus(prevTab, true);
-          if (prevTab.dataset.tabIdx !== undefined) selectTab(parseInt(prevTab.dataset.tabIdx, 10), true);
+    if (current && isVisible(current)) {
+      for (var r = 0; r < rows.length; r++) {
+        var idx = rows[r].indexOf(current);
+        if (idx !== -1) {
+          rIdx = r;
+          cIdx = idx;
+          break;
         }
-        return true;
       }
-      if (dir === "right") {
-        if (idx < tabItems.length - 1) {
-          var nextTab = tabItems[idx + 1];
-          setFocus(nextTab, true);
-          if (nextTab.dataset.tabIdx !== undefined) selectTab(parseInt(nextTab.dataset.tabIdx, 10), true);
+    }
+
+    // If current focus was lost or detached, focus the first content row (or first row in modal)
+    if (rIdx === -1) {
+      var startRow = (!state.modalOpen && rows.length > 1) ? rows[1] : rows[0];
+      return setFocus(startRow[0], true);
+    }
+
+    var curRow = rows[rIdx];
+
+    if (dir === "left") {
+      if (cIdx > 0) {
+        var prevItem = curRow[cIdx - 1];
+        setFocus(prevItem, true);
+        if (curRow._isTabBar && prevItem.dataset && prevItem.dataset.tabIdx !== undefined) {
+          selectTab(parseInt(prevItem.dataset.tabIdx, 10), true);
         }
-        return true;
       }
-      if (dir === "down") {
-        var page = el("page-scroll");
-        if (state.lastPageFocusEl && isVisible(state.lastPageFocusEl) && page.contains(state.lastPageFocusEl)) {
-          return setFocus(state.lastPageFocusEl, true);
+      return true;
+    }
+
+    if (dir === "right") {
+      if (cIdx < curRow.length - 1) {
+        var nextItem = curRow[cIdx + 1];
+        setFocus(nextItem, true);
+        if (curRow._isTabBar && nextItem.dataset && nextItem.dataset.tabIdx !== undefined) {
+          selectTab(parseInt(nextItem.dataset.tabIdx, 10), true);
         }
-        var firstInPage = page ? page.querySelector(".focusable") : null;
-        if (firstInPage && isVisible(firstInPage)) return setFocus(firstInPage, true);
       }
-      if (dir === "up") return true;
+      return true;
     }
 
-    // Special handling inside horizontal rows (.h-row) for Left / Right
-    var hRow = current.closest ? current.closest(".h-row") : null;
-    if (hRow && (dir === "left" || dir === "right")) {
-      var rowItems = Array.prototype.slice.call(hRow.querySelectorAll(".focusable")).filter(isVisible);
-      var rIdx = rowItems.indexOf(current);
-      if (dir === "left" && rIdx > 0) return setFocus(rowItems[rIdx - 1], true);
-      if (dir === "right" && rIdx < rowItems.length - 1) return setFocus(rowItems[rIdx + 1], true);
-      if (dir === "left" || dir === "right") return true;
-    }
-
-    // General 2D geometric nearest-neighbor search
-    var cr = current.getBoundingClientRect();
-    var cx = cr.left + cr.width / 2;
-    var cy = cr.top + cr.height / 2;
-
-    var best = null;
-    var bestScore = Infinity;
-
-    for (var i = 0; i < candidates.length; i++) {
-      var cand = candidates[i];
-      if (cand === current) continue;
-      var r = cand.getBoundingClientRect();
-      var x = r.left + r.width / 2;
-      var y = r.top + r.height / 2;
-      var dx = x - cx;
-      var dy = y - cy;
-
-      if (dir === "left" && dx >= -6) continue;
-      if (dir === "right" && dx <= 6) continue;
-      if (dir === "up" && dy >= -6) continue;
-      if (dir === "down" && dy <= 6) continue;
-
-      var primary = (dir === "left" || dir === "right") ? Math.abs(dx) : Math.abs(dy);
-      var cross = (dir === "left" || dir === "right") ? Math.abs(dy) : Math.abs(dx);
-
-      // Weight cross-axis distance more heavily so D-pad stays in columns/rows naturally
-      var score = primary + cross * 2.6;
-      if (score < bestScore) {
-        bestScore = score;
-        best = cand;
+    if (dir === "up") {
+      if (rIdx > 0) {
+        var targetUpRow = rows[rIdx - 1];
+        var targetUpEl = null;
+        if (targetUpRow._isTabBar) {
+          var tabBar = el("tab-bar");
+          targetUpEl = (tabBar && tabBar.querySelector('.tab-pill[data-tab-idx="' + state.currentTab + '"]')) || targetUpRow[0];
+        } else if (targetUpRow._isHRow && targetUpRow._container && typeof targetUpRow._container._lastCol === "number") {
+          targetUpEl = targetUpRow[Math.min(targetUpRow._container._lastCol, targetUpRow.length - 1)];
+        } else {
+          targetUpEl = targetUpRow[Math.min(cIdx, targetUpRow.length - 1)];
+        }
+        return setFocus(targetUpEl, true);
       }
+      return true;
     }
 
-    if (best) {
-      return setFocus(best, true);
-    }
-
-    // If pressing UP near the top of the page and nothing found, focus the active tab pill
-    if (!state.modalOpen && dir === "up" && tabBar) {
-      var activePill = tabBar.querySelector('.tab-pill[data-tab-idx="' + state.currentTab + '"]') ||
-                       tabBar.querySelector(".focusable");
-      if (activePill) return setFocus(activePill, true);
+    if (dir === "down") {
+      if (rIdx < rows.length - 1) {
+        if (curRow._isTabBar && state.lastPageFocusEl && isVisible(state.lastPageFocusEl)) {
+          var page = el("page-scroll");
+          if (page && page.contains(state.lastPageFocusEl)) {
+            return setFocus(state.lastPageFocusEl, true);
+          }
+        }
+        var targetDownRow = rows[rIdx + 1];
+        var targetDownEl = null;
+        if (targetDownRow._isHRow && targetDownRow._container && typeof targetDownRow._container._lastCol === "number") {
+          targetDownEl = targetDownRow[Math.min(targetDownRow._container._lastCol, targetDownRow.length - 1)];
+        } else if (curRow._isTabBar) {
+          targetDownEl = targetDownRow[0];
+        } else {
+          targetDownEl = targetDownRow[Math.min(cIdx, targetDownRow.length - 1)];
+        }
+        return setFocus(targetDownEl, true);
+      }
+      return true;
     }
 
     return false;
@@ -533,10 +598,8 @@ window.FMHYApp = (function () {
     if (state.screenStack.length > 0) {
       var topScreen = state.screenStack[state.screenStack.length - 1];
       topScreen.render(container);
-      setTimeout(function () {
-        var first = container.querySelector(".focusable");
-        if (first) setFocus(first, false);
-      }, 20);
+      var firstSub = container.querySelector(".focusable");
+      if (firstSub) setFocus(firstSub, false);
       return;
     }
 
@@ -548,10 +611,14 @@ window.FMHYApp = (function () {
     else if (state.currentTab === 5) buildSettingsPage(container);
 
     if (!keepFocusOnTab) {
-      setTimeout(function () {
-        var first = container.querySelector(".focusable");
-        if (first) setFocus(first, false);
-      }, 20);
+      var first = container.querySelector(".focusable");
+      if (first) {
+        setFocus(first, false);
+      } else {
+        var bar = el("tab-bar");
+        var pill = bar ? bar.querySelector('.tab-pill[data-tab-idx="' + state.currentTab + '"]') : null;
+        if (pill) setFocus(pill, false);
+      }
     }
   }
 
@@ -1732,31 +1799,36 @@ window.FMHYApp = (function () {
   }
 
   function initGlobalKeyListeners() {
-    window.addEventListener("keydown", function (e) {
-      var k = e.keyCode;
-      var key = e.key;
+    function handleKeyDown(e) {
+      if (e.__fmhyHandled) return;
+      e.__fmhyHandled = true;
+
+      var k = e.keyCode || e.which || 0;
+      var key = e.key || "";
+
+      var isLeft = (k === 37 || key === "ArrowLeft" || key === "Left");
+      var isUp = (k === 38 || key === "ArrowUp" || key === "Up");
+      var isRight = (k === 39 || key === "ArrowRight" || key === "Right");
+      var isDown = (k === 40 || key === "ArrowDown" || key === "Down");
+      var isEnter = (k === 13 || key === "Enter");
+      var isBack = (k === 10009 || k === 27 || k === 8 || key === "Escape" || key === "Backspace" || key === "XF86Back");
 
       // 1. If a Modal is open, route keys to modal first
       if (state.modalOpen) {
-        if (k === 10009 || k === 27 || key === "Escape") {
-          e.preventDefault();
-          closeModal();
-          return;
-        }
         var activeTag = document.activeElement ? document.activeElement.tagName : "";
-        if (activeTag === "INPUT" && (k === 8 || key === "Backspace" || k === 37 || k === 39)) {
+        if (activeTag === "INPUT" && (k === 8 || key === "Backspace" || isLeft || isRight)) {
           return; // allow normal text editing inside modal input
         }
-        if (k === 10009 || k === 8 || key === "Backspace") {
+        if (isBack) {
           e.preventDefault();
           closeModal();
           return;
         }
-        if (k === 37 || key === "ArrowLeft") { e.preventDefault(); moveFocusSpatial("left"); return; }
-        if (k === 39 || key === "ArrowRight") { e.preventDefault(); moveFocusSpatial("right"); return; }
-        if (k === 38 || key === "ArrowUp") { e.preventDefault(); moveFocusSpatial("up"); return; }
-        if (k === 40 || key === "ArrowDown") { e.preventDefault(); moveFocusSpatial("down"); return; }
-        if (k === 13 || key === "Enter") {
+        if (isLeft) { e.preventDefault(); moveFocusSpatial("left"); return; }
+        if (isRight) { e.preventDefault(); moveFocusSpatial("right"); return; }
+        if (isUp) { e.preventDefault(); moveFocusSpatial("up"); return; }
+        if (isDown) { e.preventDefault(); moveFocusSpatial("down"); return; }
+        if (isEnter) {
           if (activeTag !== "INPUT") {
             e.preventDefault();
             if (state.modalFocusEl && state.modalFocusEl._onClick) {
@@ -1778,22 +1850,22 @@ window.FMHYApp = (function () {
         if (window.FMHYBrowser.handleKeyDown(e)) return;
       }
 
-      // 4. If user is typing inside a search/filter <input>
+      // 4. If user is actively typing inside a search/filter <input>
       var focusedInput = (document.activeElement && document.activeElement.tagName === "INPUT") ? document.activeElement : null;
       if (focusedInput) {
-        if (k === 40 || key === "ArrowDown") {
+        if (isDown) {
           e.preventDefault();
           focusedInput.blur();
           moveFocusSpatial("down");
           return;
         }
-        if (k === 38 || key === "ArrowUp") {
+        if (isUp) {
           e.preventDefault();
           focusedInput.blur();
           moveFocusSpatial("up");
           return;
         }
-        if (k === 10009 || k === 27 || key === "Escape") {
+        if (k === 10009 || k === 27 || key === "Escape" || key === "XF86Back") {
           e.preventDefault();
           focusedInput.blur();
           popScreen();
@@ -1802,13 +1874,14 @@ window.FMHYApp = (function () {
         return;
       }
 
-      // 5. Color Shortcut Buttons on Samsung TV Remote
+      // 5. Shortcut Buttons on Samsung TV Remote (Color buttons + Play/Pause for Context Menu)
       if (k === 403) { // Red: Search
         e.preventDefault();
         openSearchScreen("");
         return;
       }
-      if (k === 405) { // Yellow: Context menu / Long-press action on focused card
+      if (k === 405 || k === 457 || k === 10252 || k === 415 || k === 19) {
+        // Yellow (405), Info (457), or Play/Pause (10252/415): Context menu / Star / Save on focused card
         e.preventDefault();
         if (state.focusedEl && state.focusedEl._onLongPress) {
           state.focusedEl._onLongPress(state.focusedEl);
@@ -1822,7 +1895,7 @@ window.FMHYApp = (function () {
       }
 
       // 6. Back / Return Key
-      if (k === 10009 || k === 27 || k === 8 || key === "Escape" || key === "Backspace") {
+      if (isBack) {
         e.preventDefault();
         if (popScreen()) return;
 
@@ -1854,45 +1927,30 @@ window.FMHYApp = (function () {
       }
 
       // 7. Directional D-Pad Navigation
-      if (k === 37 || key === "ArrowLeft") { e.preventDefault(); moveFocusSpatial("left"); return; }
-      if (k === 39 || key === "ArrowRight") { e.preventDefault(); moveFocusSpatial("right"); return; }
-      if (k === 38 || key === "ArrowUp") { e.preventDefault(); moveFocusSpatial("up"); return; }
-      if (k === 40 || key === "ArrowDown") { e.preventDefault(); moveFocusSpatial("down"); return; }
+      if (isLeft) { e.preventDefault(); moveFocusSpatial("left"); return; }
+      if (isRight) { e.preventDefault(); moveFocusSpatial("right"); return; }
+      if (isUp) { e.preventDefault(); moveFocusSpatial("up"); return; }
+      if (isDown) { e.preventDefault(); moveFocusSpatial("down"); return; }
 
-      // 8. OK / Enter with Hold-OK Long-Press Detection (500ms)
-      if (k === 13 || key === "Enter") {
+      // 8. OK / Enter: Activate focused item immediately on keydown
+      if (isEnter) {
         e.preventDefault();
-        if (e.repeat) return;
-        state.okDownTime = Date.now();
-        state.okHoldFired = false;
-        if (state.okHoldTimer) clearTimeout(state.okHoldTimer);
-        state.okHoldTimer = setTimeout(function () {
-          state.okHoldFired = true;
-          if (state.focusedEl && state.focusedEl._onLongPress) {
+        if (e.repeat) {
+          if (!state.okHoldFired && state.focusedEl && state.focusedEl._onLongPress) {
+            state.okHoldFired = true;
             state.focusedEl._onLongPress(state.focusedEl);
           }
-        }, 520);
-      }
-    });
-
-    window.addEventListener("keyup", function (e) {
-      var k = e.keyCode;
-      var key = e.key;
-      if (k === 13 || key === "Enter") {
-        if (state.okHoldTimer) {
-          clearTimeout(state.okHoldTimer);
-          state.okHoldTimer = null;
-        }
-        if (!state.okHoldFired && !state.modalOpen &&
-            (!window.FMHYPlayer || !window.FMHYPlayer.isOpen()) &&
-            (!window.FMHYBrowser || !window.FMHYBrowser.isOpen())) {
-          if (state.focusedEl && state.focusedEl._onClick) {
-            state.focusedEl._onClick(state.focusedEl);
-          }
+          return;
         }
         state.okHoldFired = false;
+        if (state.focusedEl && state.focusedEl._onClick) {
+          state.focusedEl._onClick(state.focusedEl);
+        }
       }
-    });
+    }
+
+    window.addEventListener("keydown", handleKeyDown, true);
+    document.addEventListener("keydown", handleKeyDown, true);
   }
 
   // =========================================================================
@@ -1908,18 +1966,12 @@ window.FMHYApp = (function () {
     FMHYBrowser.init();
     initGlobalKeyListeners();
 
-    // Render UI immediately so the TV screen is never blank while service/network initializes
+    // Render UI immediately and focus the first card on the page
     buildTabBar();
     renderCurrentView(false);
-    var bar = el("tab-bar");
-    var homePill = bar ? bar.querySelector('.tab-pill[data-tab-idx="0"]') : null;
-    if (homePill) setFocus(homePill, false);
 
-    FMHYData.init().then(function () {
-      if (state.currentTab === 0 && state.screenStack.length === 0 && !FMHYBrowser.isOpen() && !FMHYPlayer.isOpen()) {
-        renderCurrentView(true);
-      }
-    });
+    // Initialize background service & remote site list without destroying active DOM focus
+    FMHYData.init().catch(function () {});
   }
 
   return {

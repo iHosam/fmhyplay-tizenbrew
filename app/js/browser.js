@@ -458,13 +458,13 @@ window.FMHYBrowser = (function () {
       if (doc) {
         var target = doc.elementFromPoint(ix, iy);
         if (target) {
-          target.focus();
           target.click();
           var ev = doc.createEvent("MouseEvents");
           ev.initMouseEvent("click", true, true, iframe.contentWindow, 1, ix, iy, ix, iy, false, false, false, false, 0, null);
           target.dispatchEvent(ev);
         }
       }
+      window.focus();
     } catch (e) {}
   }
 
