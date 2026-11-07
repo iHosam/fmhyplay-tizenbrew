@@ -1,0 +1,43 @@
+{
+  "name": "fmhyplay-tizen",
+  "version": "1.0.0",
+  "description": "FMHYPlay for Samsung Tizen TV (TizenBrew) - Stream movies, series, anime, sports & 11,000+ IPTV channels in a native TV player",
+  "main": "app/index.html",
+  "packageType": "app",
+  "appName": "FMHYPlay",
+  "appPath": "app/index.html",
+  "serviceFile": "service/service.js",
+  "evaluateScriptOnDocumentStart": false,
+  "keys": [
+    "MediaPlay",
+    "MediaPause",
+    "MediaPlayPause",
+    "MediaStop",
+    "MediaFastForward",
+    "MediaRewind",
+    "MediaTrackPrevious",
+    "MediaTrackNext",
+    "ColorF0Red",
+    "ColorF1Green",
+    "ColorF2Yellow",
+    "ColorF3Blue",
+    "Info",
+    "Menu",
+    "Search"
+  ],
+  "files": [
+    "app",
+    "service",
+    "README.md"
+  ],
+  "keywords": [
+    "tizen",
+    "tizenbrew",
+    "fmhy",
+    "fmhyplay",
+    "iptv",
+    "streaming",
+    "samsung-tv"
+  ],
+  "license": "MIT"
+}

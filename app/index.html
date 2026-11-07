@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=1920, height=1080, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>FMHYPlay — Samsung Tizen TV (TizenBrew)</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <!-- HLS.js & dash.js for adaptive streaming in Tizen WebEngine -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dashjs@4.7.4/dist/dash.all.min.js"></script>
+</head>
+<body>
+  <!-- Main 10-Foot TV Interface -->
+  <div id="app-root">
+    <nav id="tab-bar"></nav>
+    <main id="page-scroll">
+      <div id="page-content" class="page-container"></div>
+    </main>
+  </div>
+
+  <!-- Site Browser & Stream Sniffer Overlay (WebActivity + Sniffer + Pointer) -->
+  <div id="browser-layer" class="fullscreen-layer">
+    <div id="browser-topbar">
+      <div id="browser-back-btn" class="browser-btn">← Back</div>
+      <div id="browser-site-title">FMHYPlay Browser</div>
+      <div id="browser-url-badge">https://fmhy.net</div>
+      <div class="browser-spacer"></div>
+      <div id="browser-play-btn" class="browser-btn">▶ Sniffing Stream…</div>
+      <div id="browser-servers-btn" class="browser-btn">⧉ Streams &amp; Servers (Yellow)</div>
+      <div id="browser-pointer-btn" class="browser-btn accent">🖱 Pointer: ON (Green)</div>
+      <div id="browser-mode-btn" class="browser-btn">🛡 Proxy: ON</div>
+      <div id="browser-reload-btn" class="browser-btn">↻ Reload</div>
+    </div>
+    <div id="browser-frame-wrap">
+      <iframe
+        id="browser-iframe"
+        sandbox="allow-scripts allow-same-origin allow-forms"
+        allow="autoplay; encrypted-media; fullscreen"
+        src="about:blank"
+      ></iframe>
+    </div>
+  </div>
+
+  <!-- Virtual D-Pad Pointer Dot -->
+  <div id="virtual-pointer"></div>
+
+  <!-- Native Video Player Overlay (PlayerActivity) -->
+  <div id="player-layer" class="fullscreen-layer">
+    <div id="player-video-wrap">
+      <video id="player-video" playsinline></video>
+
+      <div id="player-subtitle-box">
+        <span id="player-subtitle-text" style="display: none;"></span>
+      </div>
+
+      <div id="player-spinner"></div>
+      <div id="player-notice"></div>
+
+      <div id="player-controls">
+        <div class="player-topbar">
+          <div id="player-back-btn" class="player-circle-btn">←</div>
+          <div class="player-titles">
+            <div id="player-title">Now Playing</div>
+            <div id="player-ep-line"></div>
+          </div>
+        </div>
+
+        <div class="player-center-cluster">
+          <div id="player-rew-btn" class="player-skip-btn">↺<br />10</div>
+          <div id="player-play-btn" class="player-play-btn">❚❚</div>
+          <div id="player-fwd-btn" class="player-skip-btn">↻<br />10</div>
+        </div>
+
+        <div class="player-bottombar">
+          <div id="player-seek-row" class="player-seek-row">
+            <div id="player-time-pos" class="player-time">0:00</div>
+            <div id="player-seek-track">
+              <div id="player-seek-fill"></div>
+            </div>
+            <div id="player-time-dur" class="player-time">0:00</div>
+          </div>
+
+          <div id="player-chip-row">
+            <div id="pchip-servers" class="player-chip" style="display: none;">⧉ Servers</div>
+            <div id="pchip-quality" class="player-chip">⚙ Auto</div>
+            <div id="pchip-audio" class="player-chip" style="display: none;">♪ Audio</div>
+            <div id="pchip-subs" class="player-chip">💬 Subtitles</div>
+            <div id="pchip-speed" class="player-chip">▸▸ 1x</div>
+            <div id="pchip-zoom" class="player-chip">⛶ Fit</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal / Dialog Backdrop -->
+  <div id="modal-backdrop"></div>
+
+  <!-- Toast Notification -->
+  <div id="toast-box"></div>
+
+  <!-- FMHYPlay Application Scripts -->
+  <script src="js/data.js"></script>
+  <script src="js/player.js"></script>
+  <script src="js/browser.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
